@@ -1,0 +1,95 @@
+{
+  "name": "Umiña Stone #003 - Chrysocolla",
+  "creator": "Umiña Achala",
+  "description": "Certified Mine-to-Market Chrysocolla. Extracted from Arequipa Region with verified ethical provenance and full regulatory compliance.",
+  "image": "ipfs://QmChrysocollaThumbnailHash",
+  "type": "image/jpg",
+  "format": "HIP412@2.0.0",
+  "metadata_version": "1.0.0",
+  "properties": {
+    "stone_id": "UMINA-2026-CH-03",
+    "hs_code": "7103.99.00.00",
+    "jurisdiction": "Peru",
+    "legal_uri": "https://umina-achala.pe/",
+    "vendor_ruc": "20999887766",
+    "artisan_rna": "RNA-112233",
+    "mining_concession": "Arequipa-Chrys-03",
+    "reinfo_id": "PERU-MIN-445566",
+    "reinfo_status": "Vigente",
+    "cod_reference": "VUCE-ORIGIN-2026-003",
+    "standard_compliance": "DS Nº 014-92-EM",
+    "compliance_proof_hcs": "0.0.987654",
+    "audit_log_uri": "hcs://0.0.987654",
+    "last_regulatory_check": "2026-05-10T12:00:00Z",
+    "vuce_xml_hash": "sha256-abc123def456...",
+    "sunafil_payroll_verified": true,
+    "census_status": "Finalized",
+    "sinceramiento_timestamp": "2026-05-20T09:45:00Z",
+    "export_status": {
+      "is_exported": false,
+      "export_timestamp": null,
+      "export_permit_id": "VUCE-2026-EXP-100",
+      "current_location": "Peru - Pending Export"
+    },
+    "store_receipt_hash": "sha256-abc123def456...",
+    "sinceramiento_status": "Verified (Georeferenced)",
+    "inei_census_id": "INEI-2026-MAPE-8823",
+    "hcs_compliance_topic": "0.0.987654",
+    "cut_by_id": "ARTISAN-567",
+    "mounted_by_id": ""
+  },
+  "files": [
+    {
+      "uri": "ipfs://QmFullResChrysocollaHash",
+      "type": "image/jpg",
+      "is_default_file": true,
+      "metadata": {
+        "description": "High-Resolution Master Image",
+        "resolution": "4000x3000",
+        "scan_method": "Macro Photography"
+      }
+    },
+    {
+      "uri": "ipfs://QmMiningPermitPDFHash",
+      "type": "application/pdf",
+      "metadata": {
+        "description": "Official Mining Concession & Extraction Permit"
+      }
+    },
+    {
+      "uri": "ipfs://Qm3DScanChrysocollaHash",
+      "type": "model/gltf-binary",
+      "metadata": {
+        "description": "Interactive 3D Scan"
+      }
+    },
+    {
+      "uri": "ipfs://QmStoreReceiptPDFHash",
+      "type": "application/pdf",
+      "metadata": {
+        "description": "Official Store Receipt – Proof of Retail Acquisition"
+      }
+    }
+  ],
+  "attributes": [
+    { "trait_type": "Stone Type", "value": "Chrysocolla" },
+    { "trait_type": "HS Code", "value": "7103.99.00.00" },
+    { "trait_type": "Weight", "value": "8.7 carats" },
+    { "trait_type": "Grading", "value": "Collector Grade" },
+    { "trait_type": "Date Mined", "value": "2026-02-14" },
+    { "trait_type": "Stone Cut", "value": "Cabochon" },
+    { "trait_type": "Cut By", "value": "ARTISAN-567" },
+    { "trait_type": "Mounted By", "value": "" },
+    { "trait_type": "Mount Technique", "value": "Wire Wrapping" },
+    { "trait_type": "Mining Concession", "value": "Arequipa-Chrys-03" },
+    {
+      "trait_type": "Legal Status",
+      "value": "Certified Origin & Artisan Transformation"
+    },
+    {
+      "trait_type": "Verification Level",
+      "value": "Full 2026 Compliance (Mine-to-Artisan)"
+    },
+    { "trait_type": "Current Location", "value": "Peru" }
+  ]
+}

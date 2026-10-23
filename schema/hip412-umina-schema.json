@@ -1,0 +1,79 @@
+{
+  "title": "Umiña Stone HIP-412 Metadata",
+  "type": "object",
+  "required": ["name", "creator", "description", "image", "format", "metadata_version", "properties", "files", "attributes"],
+  "properties": {
+    "name": { "type": "string" },
+    "creator": { "type": "string" },
+    "description": { "type": "string" },
+    "image": { "type": "string", "pattern": "^ipfs://.*" },
+    "type": { "type": "string" },
+    "format": { "type": "string", "enum": ["HIP412@2.0.0"] },
+    "metadata_version": { "type": "string" },
+
+    "properties": {
+      "type": "object",
+      "required": ["stone_id", "hs_code", "jurisdiction", "legal_uri", "vendor_ruc", "mining_concession", "reinfo_id"],
+      "properties": {
+        "stone_id": { "type": "string" },
+        "hs_code": { "type": "string" },
+        "jurisdiction": { "type": "string" },
+        "legal_uri": { "type": "string", "format": "uri" },
+        "vendor_ruc": { "type": "string" },
+        "artisan_rna": { "type": "string" },
+        "mining_concession": { "type": "string" },
+        "reinfo_id": { "type": "string" },
+        "reinfo_status": { "type": "string" },
+        "cod_reference": { "type": "string" },
+        "standard_compliance": { "type": "string" },
+        "compliance_proof_hcs": { "type": "string" },
+        "audit_log_uri": { "type": "string" },
+        "last_regulatory_check": { "type": "string", "format": "date-time" },
+        "vuce_xml_hash": { "type": "string" },
+        "sunafil_payroll_verified": { "type": "boolean" },
+        "census_status": { "type": "string" },
+        "sinceramiento_timestamp": { "type": "string", "format": "date-time" },
+        "export_status": {
+          "type": "object",
+          "required": ["is_exported", "export_permit_id", "current_location"],
+          "properties": {
+            "is_exported": { "type": "boolean" },
+            "export_timestamp": { "type": ["string", "null"], "format": "date-time" },
+            "export_permit_id": { "type": "string" },
+            "current_location": { "type": "string" }
+          }
+        },
+        "store_receipt_hash": { "type": "string" },
+        "sinceramiento_status": { "type": "string" },
+        "inei_census_id": { "type": "string" },
+        "hcs_compliance_topic": { "type": "string" }
+      }
+    },
+
+    "files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["uri", "type"],
+        "properties": {
+          "uri": { "type": "string", "pattern": "^ipfs://.*" },
+          "type": { "type": "string" },
+          "is_default_file": { "type": "boolean" },
+          "metadata": { "type": "object" }
+        }
+      }
+    },
+
+    "attributes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["trait_type", "value"],
+        "properties": {
+          "trait_type": { "type": "string" },
+          "value": { "type": ["string", "number", "boolean"] }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,9 @@
+# Sensitive Credentials
+.env
+.env.testnet
+.env.mainnet
+
+node_modules/
+*.log
+.DS_Store
+.vscode/
