@@ -1,0 +1,42 @@
+{
+  "name": null,
+  "creator": "Umiña Achala",
+  "description": null,
+  "format": "HIP412@2.0.0",
+  "metadata_version": "1.0.0",
+  "properties": {
+    "stone_id": null,
+    "hs_code": null,
+    "jurisdiction": null,
+    "legal_uri": null,
+    "vendor_ruc": null,
+    "artisan_rna": null,
+    "mining_concession": null,
+    "reinfo_id": null,
+    "reinfo_status": null,
+    "cod_reference": null,
+    "standard_compliance": null,
+    "compliance_proof_hcs": null,
+    "audit_log_uri": null,
+    "last_regulatory_check": null,
+    "vuce_xml_hash": null,
+    "sunafil_payroll_verified": null,
+    "census_status": null,
+    "sinceramiento_timestamp": null,
+    "export_status": {
+      "is_exported": null,
+      "export_timestamp": null,
+      "export_permit_id": null,
+      "current_location": null
+    },
+    "store_receipt_hash": null,
+    "sinceramiento_status": null,
+    "inei_census_id": null,
+    "hcs_compliance_topic": null,
+    "cut_by_id": null,
+    "mounted_by_id": null
+  },
+  "attributes": [],
+  "images": [],
+  "documents": []
+}

@@ -1,0 +1,39 @@
+{
+  "name": "Umiña Stone #99 - Chrysocolla",
+  "description": "Sample chrysocolla cabochon from Arequipa, submitted through the mint form (fake data for testing).",
+  "stone_id": "UMINA-2026-CH-99",
+  "hs_code": "7103.99.00.00",
+  "jurisdiction": "Peru",
+  "legal_uri": "https://umina-achala.pe/",
+  "vendor_ruc": "20999887766",
+  "mining_concession": "Arequipa-Chrys-03",
+  "reinfo_id": "PERU-MIN-445566",
+  "reinfo_status": "Vigente",
+  "attributes": {
+    "Stone Type": "Chrysocolla",
+    "Weight": "8.7 carats",
+    "Grading": "Collector Grade",
+    "Date Mined": "2026-02-14",
+    "Stone Cut": "Cabochon"
+  },
+  "images": [
+    {
+      "file": "../samples/thumb.jpg",
+      "description": "Front view, thumbnail"
+    },
+    {
+      "file": "../samples/master.jpg",
+      "description": "High-resolution master image"
+    }
+  ],
+  "documents": [
+    {
+      "file": "../samples/store-receipt.pdf",
+      "description": "Store receipt (sample, fake)"
+    },
+    {
+      "file": "../samples/mining-permit.pdf",
+      "description": "Mining concession and extraction permit (sample, fake)"
+    }
+  ]
+}
