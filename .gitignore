@@ -7,3 +7,9 @@ node_modules/
 *.log
 .DS_Store
 .vscode/
+
+# Local images and documents for test mints (pinned to IPFS, not committed)
+samples/
+
+# Metadata files generated from a mint form post
+generated/
