@@ -12,6 +12,7 @@
  */
 
 import dotenv from "dotenv";
+import path from "path";
 import { Client } from "@hashgraph/sdk";
 import {
   buildTokenTransaction,
@@ -24,10 +25,21 @@ import {
 const args = process.argv.slice(2);
 const dryRun = args.includes("--dry-run");
 const envFile = args.find((a) => !a.startsWith("--")) ?? ".env.testnet";
-dotenv.config({ path: envFile });
+// The client below is always testnet, so refuse a file meant for another
+// network rather than send its credentials to the wrong one.
+const testnetOnly = path.basename(envFile).includes("testnet");
+if (testnetOnly) dotenv.config({ path: envFile });
 
 async function main() {
   console.log("🚀 Creating Umiña NFT Class...");
+
+  if (!testnetOnly) {
+    console.error(
+      `❌ ${envFile} is not a testnet env file. This script is testnet only; mainnet support is not built yet.`,
+    );
+    process.exitCode = 1;
+    return;
+  }
 
   // --- 1. Check the environment ---
   const problems = validateEnv(process.env);

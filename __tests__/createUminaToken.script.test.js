@@ -89,8 +89,20 @@ describe("createUminaToken.js", () => {
 
     jest.resetModules();
     mockDependencies();
-    await runScript("other.env", "--dry-run");
-    expect(calls.dotenv).toHaveBeenCalledWith({ path: "other.env" });
+    await runScript("other.testnet.env", "--dry-run");
+    expect(calls.dotenv).toHaveBeenCalledWith({ path: "other.testnet.env" });
+  });
+
+  test("refuses a mainnet env file without loading it or connecting", async () => {
+    mockDependencies();
+    await runScript(".env.mainnet");
+
+    expect(calls.dotenv).not.toHaveBeenCalled();
+    expect(calls.forTestnet).not.toHaveBeenCalled();
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining("is not a testnet env file"),
+    );
+    expect(process.exitCode).toBe(1);
   });
 
   test("--dry-run prints the parameters and never connects", async () => {
