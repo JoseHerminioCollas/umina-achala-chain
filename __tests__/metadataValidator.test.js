@@ -1,7 +1,10 @@
 import fs from "fs";
 import { validateMetadata } from "../src/metadataValidator.js";
+import { withPlaceholderAssets } from "../src/mintUmina.js";
 
-const load = () => JSON.parse(fs.readFileSync("./json/example.json", "utf8"));
+// image and files are added at mint time, so check the template with placeholders
+const load = () =>
+  withPlaceholderAssets(JSON.parse(fs.readFileSync("./json/example.json", "utf8")));
 
 describe("validateMetadata", () => {
   test("accepts the example metadata", () => {
