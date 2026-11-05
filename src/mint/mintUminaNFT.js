@@ -14,7 +14,7 @@
  * their CIDs, the two lists are dropped, and the result is pinned.
  *
  * Run from the command line:
- * node src/mint/mintUminaNFT.js [metadata-file | --form post-file] [--out dir] [--dry-run]
+ * node src/mint/mintUminaNFT.js [metadata-file | --form post-file] [--out dir] [--force] [--dry-run]
  *
  * With --form the input is a simulated mint form post (see formPost.js). The
  * metadata file is generated from it into --out (default generated/) and then
@@ -22,6 +22,12 @@
  * required. The properties.stone_id must follow UMINA-YYYY-XX-NN. Variables come from
  * .env.testnet. --dry-run checks the environment and the metadata and sends
  * nothing, but still writes the generated metadata file.
+ *
+ * Before pinning, a real run reads the HCS topic from the mirror node and
+ * refuses a stone_id that already has a MINT event, or a topic that does not
+ * exist (the mint would have nowhere to be recorded). --force skips the
+ * duplicate check, not the topic check. If the run fails after pinning, the
+ * CIDs pinned so far are printed so they can be unpinned in Pinata.
  *
  * ## Output
  * - IPFS CID of pinned metadata
@@ -35,11 +41,13 @@ import { buildEvent, loadSubmitKey, submitEvent } from "../hcs.js";
 import fs from "fs";
 import { validateMetadata } from "./metadataValidator.js";
 import path from "path";
+import { topicEvents } from "../mirror.js";
 import {
   buildMetadata,
   checkStoneId,
   collectDocuments,
   collectImages,
+  findMint,
   missingAssets,
   pinFile,
   pinJson,
@@ -51,6 +59,7 @@ import { parseEcdsaKey } from "../keys.js";
 
 const args = process.argv.slice(2);
 const dryRun = args.includes("--dry-run");
+const force = args.includes("--force");
 const option = (name) => {
   const i = args.indexOf(name);
   return i === -1 ? undefined : args[i + 1];
@@ -116,7 +125,26 @@ async function main() {
       return;
     }
 
-    // --- 2. Connect to Hedera testnet ---
+    // --- 2. Check the HCS topic: it exists, and the stone is not minted yet ---
+    let events;
+    try {
+      events = await topicEvents(process.env.HCS_TOPIC_ID);
+    } catch (err) {
+      console.error(`❌ Cannot read HCS_TOPIC_ID ${process.env.HCS_TOPIC_ID}: ${err.message}`);
+      process.exitCode = 1;
+      return;
+    }
+    const earlier = findMint(events, stoneId);
+    if (earlier && !force) {
+      console.error(
+        `❌ ${stoneId} is already minted (MINT event #${earlier.sequence_number}, serials ${earlier.event.serials}). Use --force to mint it again.`,
+      );
+      process.exitCode = 1;
+      return;
+    }
+    if (earlier) console.log(`⚠️  ${stoneId} is already minted; minting again (--force).`);
+
+    // --- 3. Connect to Hedera testnet ---
     const operatorId = process.env.OPERATOR_ID;
     const supplyKey = parseEcdsaKey(process.env.SUPPLY_KEY);
     client = Client.forTestnet().setOperator(
@@ -124,32 +152,50 @@ async function main() {
       parseEcdsaKey(process.env.OPERATOR_KEY),
     );
 
-    // --- 3. Pin the images and documents, then the metadata JSON ---
-    // The same file listed twice is pinned once.
-    const cidsByFile = new Map();
-    for (const item of assets) {
-      if (cidsByFile.has(item.file)) continue;
-      const name = `${stoneId}-${path.basename(item.file)}`;
-      const fileCid = await pinFile(item.file, name, item.mime, process.env.PINATA_JWT);
-      cidsByFile.set(item.file, fileCid);
-      console.log(`✅ Pinned ${path.basename(item.file)}: ipfs://${fileCid}`);
-    }
-    const pinned = buildMetadata(metadata, images, cidsByFile, documents);
-    const cid = await pinJson(pinned, stoneId, process.env.PINATA_JWT);
-    const ipfsUri = `ipfs://${cid}`;
-    console.log(`✅ Metadata pinned to IPFS: ${ipfsUri}`);
+    // --- 4. Pin the images and documents, then the metadata JSON, then mint ---
+    // The same file listed twice is pinned once. If anything fails before the
+    // mint succeeds, list what was pinned, since no NFT points to it.
+    const pinnedCids = [];
+    let cid, ipfsUri, serials, mintTxId;
+    try {
+      const cidsByFile = new Map();
+      for (const item of assets) {
+        if (cidsByFile.has(item.file)) continue;
+        const name = `${stoneId}-${path.basename(item.file)}`;
+        const fileCid = await pinFile(item.file, name, item.mime, process.env.PINATA_JWT);
+        cidsByFile.set(item.file, fileCid);
+        pinnedCids.push(fileCid);
+        console.log(`✅ Pinned ${path.basename(item.file)}: ipfs://${fileCid}`);
+      }
+      const pinned = buildMetadata(metadata, images, cidsByFile, documents);
+      cid = await pinJson(pinned, stoneId, process.env.PINATA_JWT);
+      pinnedCids.push(cid);
+      ipfsUri = `ipfs://${cid}`;
+      console.log(`✅ Metadata pinned to IPFS: ${ipfsUri}`);
 
-    // --- 4. Mint NFT under existing Umiña Token ID (supply key signs) ---
-    const mintTx = await new TokenMintTransaction()
-      .setTokenId(process.env.UMINA_TOKEN_ID)
-      .setMetadata([Buffer.from(ipfsUri)])
-      .freezeWith(client)
-      .sign(supplyKey);
-    const mintResponse = await mintTx.execute(client);
-    const mintReceipt = await mintResponse.getReceipt(client);
-    const serials = mintReceipt.serials.map(String);
-    const mintTxId = mintResponse.transactionId.toString();
-    console.log(`✅ Minted Umiña NFT serials: ${serials} (${mintTxId})`);
+      // Mint NFT under existing Umiña Token ID (supply key signs)
+      const mintTx = await new TokenMintTransaction()
+        .setTokenId(process.env.UMINA_TOKEN_ID)
+        .setMetadata([Buffer.from(ipfsUri)])
+        .freezeWith(client)
+        .sign(supplyKey);
+      const mintResponse = await mintTx.execute(client);
+      const mintReceipt = await mintResponse.getReceipt(client);
+      serials = mintReceipt.serials.map(String);
+      mintTxId = mintResponse.transactionId.toString();
+      console.log(`✅ Minted Umiña NFT serials: ${serials} (${mintTxId})`);
+    } catch (err) {
+      console.error(`❌ Nothing was minted for ${stoneId}:`, err);
+      if (pinnedCids.length) {
+        console.error(
+          `   These pins are not used by any NFT; unpin them in Pinata: ${pinnedCids
+            .map((c) => `ipfs://${c}`)
+            .join(", ")}`,
+        );
+      }
+      process.exitCode = 1;
+      return;
+    }
 
     // --- 5. Submit Minting message to HCS (Birth Certificate) ---
     // The NFT exists now, so if this fails say so and keep what is needed to

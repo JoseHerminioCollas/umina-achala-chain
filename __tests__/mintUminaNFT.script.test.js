@@ -10,8 +10,16 @@ import { PrivateKey } from "@hashgraph/sdk";
 const key = PrivateKey.generateECDSA().toStringDer();
 const calls = {};
 
-function mockDependencies({ pinStatus = 200, mintError, hcsError, hcsReceiptError } = {}) {
+function mockDependencies({
+  pinStatus = 200,
+  mintError,
+  hcsError,
+  hcsReceiptError,
+  mirrorStatus = 200,
+  topicEvents = [],
+} = {}) {
   calls.order = [];
+  calls.mirror = [];
   calls.mint = null;
   calls.signed = [];
   calls.hcs = null;
@@ -71,6 +79,22 @@ function mockDependencies({ pinStatus = 200, mintError, hcsError, hcsReceiptErro
   }));
 
   global.fetch = jest.fn(async (url, init) => {
+    if (url.startsWith("https://testnet.mirrornode.hedera.com/")) {
+      // The HCS topic's messages, one page, base64-encoded as the mirror node does
+      calls.mirror.push(url);
+      return {
+        ok: mirrorStatus === 200,
+        status: mirrorStatus,
+        text: async () => "mirror says no",
+        json: async () => ({
+          messages: topicEvents.map((event, i) => ({
+            sequence_number: i + 1,
+            message: Buffer.from(JSON.stringify(event)).toString("base64"),
+          })),
+          links: { next: null },
+        }),
+      };
+    }
     if (url.endsWith("pinFileToIPFS")) {
       calls.order.push("pinFile");
       calls.files.push({
@@ -340,6 +364,95 @@ describe("mintUminaNFT.js", () => {
     expect(calls.order).toEqual(["pinFile", "pinFile", "pin", "mint"]);
     expect(process.exitCode).toBe(1);
     expect(calls.close).toHaveBeenCalled();
+  });
+
+  test("lists every pinned CID when the mint fails, so they can be unpinned", async () => {
+    mockDependencies({ mintError: new Error("TOKEN_HAS_NO_SUPPLY_KEY") });
+    await runScript(writeMetadata());
+
+    expect(console.error).toHaveBeenCalledWith(
+      "   These pins are not used by any NFT; unpin them in Pinata: ipfs://QmFile1, ipfs://QmFile2, ipfs://QmMockCID12345",
+    );
+  });
+
+  test("lists the images already pinned when a later pin fails", async () => {
+    mockDependencies();
+    let pins = 0;
+    const realFetch = global.fetch;
+    global.fetch = jest.fn(async (url, init) => {
+      if (url.endsWith("pinFileToIPFS") && ++pins === 2) {
+        return { ok: false, status: 500, text: async () => "down" };
+      }
+      return realFetch(url, init);
+    });
+    await runScript(writeMetadata());
+
+    expect(console.error).toHaveBeenCalledWith(
+      "   These pins are not used by any NFT; unpin them in Pinata: ipfs://QmFile1",
+    );
+    expect(process.exitCode).toBe(1);
+  });
+
+  test("reads the HCS topic from the mirror node before pinning", async () => {
+    mockDependencies();
+    await runScript(writeMetadata());
+
+    expect(calls.mirror).toEqual([
+      "https://testnet.mirrornode.hedera.com/api/v1/topics/0.0.3003/messages?limit=100&order=asc",
+    ]);
+  });
+
+  test("refuses a stone_id that already has a MINT event and pins nothing", async () => {
+    mockDependencies({
+      topicEvents: [{ event: "MINT", stone_id: "UMINA-2026-CH-03", serials: ["4"] }],
+    });
+    await runScript(writeMetadata());
+
+    expect(console.error).toHaveBeenCalledWith(
+      "❌ UMINA-2026-CH-03 is already minted (MINT event #1, serials 4). Use --force to mint it again.",
+    );
+    expect(calls.order).toEqual([]);
+    expect(process.exitCode).toBe(1);
+  });
+
+  test("ignores MINT events for other stones and other event types", async () => {
+    mockDependencies({
+      topicEvents: [
+        { event: "MINT", stone_id: "UMINA-2026-CH-04", serials: ["5"] },
+        { event: "SALE", stone_id: "UMINA-2026-CH-03", serials: ["4"] },
+      ],
+    });
+    await runScript(writeMetadata());
+
+    expect(calls.order).toEqual(["pinFile", "pinFile", "pin", "mint", "hcs"]);
+  });
+
+  test("--force mints a stone_id that already has a MINT event", async () => {
+    mockDependencies({
+      topicEvents: [{ event: "MINT", stone_id: "UMINA-2026-CH-03", serials: ["4"] }],
+    });
+    await runScript(writeMetadata(), "--force");
+
+    expect(calls.order).toEqual(["pinFile", "pinFile", "pin", "mint", "hcs"]);
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  test("refuses to mint when the HCS topic does not exist, even with --force", async () => {
+    mockDependencies({ mirrorStatus: 404 });
+    await runScript(writeMetadata(), "--force");
+
+    expect(console.error).toHaveBeenCalledWith(
+      "❌ Cannot read HCS_TOPIC_ID 0.0.3003: HCS topic 0.0.3003 was not found on the mirror node",
+    );
+    expect(calls.order).toEqual([]);
+    expect(process.exitCode).toBe(1);
+  });
+
+  test("--dry-run does not read the mirror node", async () => {
+    mockDependencies();
+    await runScript(writeMetadata(), "--dry-run");
+
+    expect(calls.mirror).toEqual([]);
   });
 
   test("reports the minted serials when HCS notarization fails", async () => {

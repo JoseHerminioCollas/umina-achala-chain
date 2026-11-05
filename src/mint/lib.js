@@ -48,6 +48,14 @@ export function validateMintEnv(env) {
   return problems;
 }
 
+/**
+ * Returns the earlier MINT event for a stone, from a topic's events (see
+ * topicEvents in mirror.js), or undefined when the stone was never minted.
+ */
+export function findMint(events, stoneId) {
+  return events.find(({ event }) => event.event === "MINT" && event.stone_id === stoneId);
+}
+
 /** Returns a problem message when the stone_id does not follow the scheme. */
 export function checkStoneId(stoneId) {
   return STONE_ID.test(stoneId ?? "")
