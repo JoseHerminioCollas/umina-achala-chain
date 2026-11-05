@@ -12,6 +12,70 @@ import list from "../../schema/stone-types.json" with { type: "json" };
 /** The stone types, by id. */
 export const STONE_TYPES = new Map(list.types.map((t) => [t.id, t]));
 
+/**
+ * The list id for an IMA mineral name: lowercase ASCII, accents removed,
+ * apostrophes dropped, anything else between letters and digits becoming "_".
+ * "Abenakiite-(Ce)" → "abenakiite_ce", "Krut'aite" → "krutaite".
+ */
+export function imaId(name) {
+  return name
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase()
+    .replace(/['’]/g, "")
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+/**
+ * Merges IMA species names into a stone type list. Curated entries (no
+ * source, or source other than "ima") always win: an IMA name with the same
+ * id leaves them unchanged. Earlier IMA entries are replaced by the new
+ * import, so re-running it with a newer export adds and keeps species; a
+ * species missing from the new export is kept and marked deprecated, never
+ * deleted (ids are permanent).
+ * @param {{ types: object[] }} list
+ * @param {string[]} names IMA mineral names
+ * @param {object} importInfo recorded in list.ima_import
+ * @returns {{ list: object, added: number, curatedKept: string[], deprecated: string[] }}
+ */
+export function mergeImaSpecies(list, names, importInfo) {
+  const curated = list.types.filter((t) => t.source !== "ima");
+  const curatedIds = new Set(curated.map((t) => t.id));
+  const previous = new Map(list.types.filter((t) => t.source === "ima").map((t) => [t.id, t]));
+  const imported = new Map();
+  for (const name of names) {
+    const id = imaId(name);
+    if (!id) throw new Error(`IMA name "${name}" gives an empty id`);
+    if (imported.has(id)) {
+      throw new Error(`IMA names "${imported.get(id).name.en}" and "${name}" both give the id "${id}"`);
+    }
+    if (curatedIds.has(id)) continue;
+    imported.set(id, {
+      id,
+      name: { en: name },
+      kind: "mineral",
+      ima_species: name.toLowerCase(),
+      source: "ima",
+    });
+  }
+  const curatedKept = names.map(imaId).filter((id) => curatedIds.has(id));
+  const deprecated = [];
+  for (const [id, entry] of previous) {
+    if (!imported.has(id)) {
+      imported.set(id, { ...entry, deprecated: true });
+      if (!entry.deprecated) deprecated.push(id);
+    }
+  }
+  const imaTypes = [...imported.values()].sort((a, b) => a.id.localeCompare(b.id));
+  return {
+    list: { ...list, ima_import: importInfo, types: [...curated, ...imaTypes] },
+    added: imaTypes.filter((t) => !previous.has(t.id)).length,
+    curatedKept,
+    deprecated,
+  };
+}
+
 /** Attribute names the mint script writes; any hand-written ones are replaced. */
 export const GENERATED_TRAITS = ["Stone Type", "Materials", "Form"];
 
