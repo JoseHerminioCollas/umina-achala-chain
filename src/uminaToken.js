@@ -6,7 +6,9 @@
  */
 
 import {
+  CustomFixedFee,
   CustomRoyaltyFee,
+  Hbar,
   PrivateKey,
   TokenCreateTransaction,
   TokenSupplyType,
@@ -19,6 +21,8 @@ export const TOKEN_MEMO = "Umiña Achala: Authentic Peruvian Stones and Minerals
 export const ROYALTY = { numerator: 5, denominator: 100 };
 
 const ACCOUNT_ID = /^0\.0\.\d+$/;
+// An HBAR amount with at most 8 decimals (1 tinybar = 0.00000001 HBAR)
+const HBAR_AMOUNT = /^\d+(\.\d{1,8})?$/;
 const ID_NAMES = ["OPERATOR_ID", "TREASURY_ID"];
 const KEY_NAMES = [
   "OPERATOR_KEY",
@@ -48,8 +52,9 @@ export function parseEcdsaKey(value) {
 /**
  * Checks the environment and returns the problems found, each naming the
  * variable that is wrong. An empty array means the environment is usable.
- * METADATA_KEY defaults to ADMIN_KEY. TREASURY_KEY is required only when the
- * treasury is not the operator account, because the treasury must sign.
+ * TREASURY_KEY is required only when the treasury is not the operator account,
+ * because the treasury must sign. FALLBACK_FEE_HBAR is the royalty's fallback
+ * fee in HBAR (about USD 3, converted on the day the token is created).
  */
 export function validateEnv(env) {
   const problems = [];
@@ -60,8 +65,14 @@ export function validateEnv(env) {
       problems.push(`${name} must look like 0.0.1234, got "${env[name]}"`);
   }
 
+  const fallback = env.FALLBACK_FEE_HBAR;
+  if (!fallback) problems.push("FALLBACK_FEE_HBAR is missing");
+  else if (!HBAR_AMOUNT.test(fallback) || Number(fallback) <= 0)
+    problems.push(
+      `FALLBACK_FEE_HBAR must be a positive HBAR amount such as 38 or 37.5, got "${fallback}"`,
+    );
+
   const keyNames = [...KEY_NAMES];
-  if (env.METADATA_KEY) keyNames.push("METADATA_KEY");
   if (env.TREASURY_ID !== env.OPERATOR_ID) {
     if (!env.TREASURY_KEY)
       problems.push("TREASURY_KEY is required when TREASURY_ID is not OPERATOR_ID");
@@ -92,12 +103,15 @@ export function loadKeys(env) {
     feeSchedule: key("FEE_SCHEDULE_KEY"),
     pause: key("PAUSE_KEY"),
     wipe: key("WIPE_KEY"),
-    metadata: key(env.METADATA_KEY ? "METADATA_KEY" : "ADMIN_KEY"),
     treasury: env.TREASURY_KEY ? key("TREASURY_KEY") : null,
   };
 }
 
-/** Builds the (unfrozen) transaction. Only public keys are set on the token. */
+/**
+ * Builds the (unfrozen) transaction. Only public keys are set on the token.
+ * No metadata key is set: NFT metadata is immutable, and a key left off at
+ * creation can never be added (umina-achala-chain#1).
+ */
 export function buildTokenTransaction(env, keys) {
   const treasuryId = env.TREASURY_ID;
 
@@ -113,13 +127,16 @@ export function buildTokenTransaction(env, keys) {
     .setFeeScheduleKey(keys.feeSchedule.publicKey)
     .setPauseKey(keys.pause.publicKey)
     .setWipeKey(keys.wipe.publicKey)
-    .setMetadataKey(keys.metadata.publicKey)
-    // Royalty policy: 5% of resale payments, no fallback fee
+    // Royalty policy: 5% of resale payments. The fallback fee is charged to
+    // the receiver when no HBAR or fungible token moves with the NFT.
     .setCustomFees([
       new CustomRoyaltyFee()
         .setNumerator(ROYALTY.numerator)
         .setDenominator(ROYALTY.denominator)
-        .setFeeCollectorAccountId(treasuryId),
+        .setFeeCollectorAccountId(treasuryId)
+        .setFallbackFee(
+          new CustomFixedFee().setHbarAmount(Hbar.fromString(env.FALLBACK_FEE_HBAR)),
+        ),
     ])
     // Supply and divisibility
     .setSupplyType(TokenSupplyType.Infinite)
@@ -137,9 +154,11 @@ export function describeToken(env, keys) {
     supplyType: "Infinite",
     treasury: env.TREASURY_ID,
     autoRenewAccount: env.TREASURY_ID,
-    royalty: `${ROYALTY.numerator}/${ROYALTY.denominator} to ${env.TREASURY_ID}, no fallback fee`,
+    royalty: `${ROYALTY.numerator}/${ROYALTY.denominator} to ${env.TREASURY_ID}`,
+    fallbackFee: `${env.FALLBACK_FEE_HBAR} HBAR`,
     memo: TOKEN_MEMO,
-    roles: ["admin", "supply", "feeSchedule", "pause", "wipe", "metadata"],
+    roles: ["admin", "supply", "feeSchedule", "pause", "wipe"],
+    metadataKey: "none (NFT metadata is immutable)",
     treasurySignsSeparately: Boolean(keys.treasury),
   };
 }

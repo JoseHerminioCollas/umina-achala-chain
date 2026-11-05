@@ -19,6 +19,7 @@ function makeEnv(overrides = {}) {
     FEE_SCHEDULE_KEY: operatorKey,
     PAUSE_KEY: operatorKey,
     WIPE_KEY: operatorKey,
+    FALLBACK_FEE_HBAR: "38",
     ...overrides,
   };
 }
@@ -59,6 +60,18 @@ describe("validateEnv", () => {
     );
   });
 
+  test("requires a positive FALLBACK_FEE_HBAR", () => {
+    const env = makeEnv();
+    delete env.FALLBACK_FEE_HBAR;
+    expect(validateEnv(env)).toContain("FALLBACK_FEE_HBAR is missing");
+    for (const bad of ["0", "-3", "abc", "3 USD", "1.123456789"]) {
+      expect(validateEnv(makeEnv({ FALLBACK_FEE_HBAR: bad })).join()).toMatch(
+        /FALLBACK_FEE_HBAR must be a positive HBAR amount/,
+      );
+    }
+    expect(validateEnv(makeEnv({ FALLBACK_FEE_HBAR: "37.5" }))).toEqual([]);
+  });
+
   test("requires TREASURY_KEY only when the treasury is another account", () => {
     expect(validateEnv(makeEnv({ TREASURY_ID: "0.0.2002" }))).toContain(
       "TREASURY_KEY is required when TREASURY_ID is not OPERATOR_ID",
@@ -96,7 +109,7 @@ describe("buildTokenTransaction", () => {
     expect(tx.autoRenewAccountId.toString()).toBe("0.0.1001");
   });
 
-  test("sets all six role keys as public keys, wipe and metadata included", () => {
+  test("sets the five role keys as public keys, wipe included", () => {
     const publicKey = PrivateKey.fromStringECDSA(operatorKey).publicKey.toString();
     for (const role of [
       tx.adminKey,
@@ -104,26 +117,34 @@ describe("buildTokenTransaction", () => {
       tx.feeScheduleKey,
       tx.pauseKey,
       tx.wipeKey,
-      tx.metadataKey,
     ]) {
       expect(role.toString()).toBe(publicKey);
     }
   });
 
-  test("has a single 5% royalty to the treasury and no fallback fee", () => {
+  test("sets no metadata key, so NFT metadata is immutable", () => {
+    expect(tx.metadataKey).toBeNull();
+  });
+
+  test("ignores a METADATA_KEY left in the environment", () => {
+    const custom = makeEnv({ METADATA_KEY: PrivateKey.generateECDSA().toStringDer() });
+    expect(buildTokenTransaction(custom, loadKeys(custom)).metadataKey).toBeNull();
+  });
+
+  test("has a single 5% royalty to the treasury with the HBAR fallback fee", () => {
     expect(tx.customFees).toHaveLength(1);
     const [fee] = tx.customFees;
     expect(fee.numerator.toNumber()).toBe(5);
     expect(fee.denominator.toNumber()).toBe(100);
     expect(fee.feeCollectorAccountId.toString()).toBe("0.0.1001");
-    expect(fee.fallbackFee).toBeNull();
+    expect(fee.fallbackFee.hbarAmount.toTinybars().toString()).toBe("3800000000");
+    expect(fee.fallbackFee.denominatingTokenId).toBeNull();
   });
 
-  test("METADATA_KEY, when set, replaces the admin key as the metadata key", () => {
-    const other = PrivateKey.generateECDSA();
-    const custom = makeEnv({ METADATA_KEY: other.toStringDer() });
-    const built = buildTokenTransaction(custom, loadKeys(custom));
-    expect(built.metadataKey.toString()).toBe(other.publicKey.toString());
+  test("takes a fractional fallback fee down to the tinybar", () => {
+    const custom = makeEnv({ FALLBACK_FEE_HBAR: "37.12345678" });
+    const [fee] = buildTokenTransaction(custom, loadKeys(custom)).customFees;
+    expect(fee.fallbackFee.hbarAmount.toTinybars().toString()).toBe("3712345678");
   });
 });
 
@@ -133,6 +154,8 @@ describe("describeToken", () => {
     const text = JSON.stringify(describeToken(env, loadKeys(env)));
     expect(text).toContain("Umiña");
     expect(text).toContain("5/100");
+    expect(text).toContain("38 HBAR");
+    expect(text).not.toContain('"metadata"');
     expect(text).not.toContain(operatorKey);
   });
 });

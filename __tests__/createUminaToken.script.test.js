@@ -51,6 +51,7 @@ function setEnv(extra = {}) {
     FEE_SCHEDULE_KEY: key,
     PAUSE_KEY: key,
     WIPE_KEY: key,
+    FALLBACK_FEE_HBAR: "38",
     ...extra,
   });
 }
