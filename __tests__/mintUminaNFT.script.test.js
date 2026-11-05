@@ -398,6 +398,7 @@ describe("mintUminaNFT.js", () => {
     await runScript(writeMetadata());
 
     expect(calls.mirror).toEqual([
+      "https://testnet.mirrornode.hedera.com/api/v1/topics/0.0.3003",
       "https://testnet.mirrornode.hedera.com/api/v1/topics/0.0.3003/messages?limit=100&order=asc",
     ]);
   });

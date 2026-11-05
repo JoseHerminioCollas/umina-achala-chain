@@ -25,12 +25,19 @@ export async function topicInfo(topicId, fetchFn = fetch) {
 /**
  * Reads every message on an HCS topic, oldest first, and returns the ones
  * that are JSON objects (events), each with its sequence number. Messages
- * that are not JSON are skipped. Throws when the topic does not exist.
+ * that are not JSON are skipped. Throws when the topic does not exist or is
+ * deleted.
  * @param {string} topicId
  * @param {typeof fetch} [fetchFn]
  * @returns {Promise<Array<{ sequence_number: number, event: object }>>}
  */
 export async function topicEvents(topicId, fetchFn = fetch) {
+  // The messages endpoint answers 200 with no messages for a topic that does
+  // not exist, so look the topic itself up first.
+  const info = await topicInfo(topicId, fetchFn);
+  if (!info || info.deleted) {
+    throw new Error(`HCS topic ${topicId} was not found on the mirror node`);
+  }
   const events = [];
   let next = `/api/v1/topics/${topicId}/messages?limit=100&order=asc`;
   while (next) {
