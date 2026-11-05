@@ -4,7 +4,7 @@
  * defining it as a non-fungible token with a custom royalty fee and role keys.
  *
  * Run from the command line:
- * node src/createUminaToken.js [env-file] [--dry-run]
+ * node src/token/createUminaToken.js [env-file] [--dry-run]
  *
  * The env file defaults to .env.testnet. --dry-run checks the environment and
  * prints the token parameters without keys and without touching the network.
@@ -14,13 +14,8 @@
 import dotenv from "dotenv";
 import path from "path";
 import { Client } from "@hashgraph/sdk";
-import {
-  buildTokenTransaction,
-  describeToken,
-  loadKeys,
-  parseEcdsaKey,
-  validateEnv,
-} from "./uminaToken.js";
+import { buildTokenTransaction, describeToken, loadKeys, validateEnv } from "./lib.js";
+import { parseEcdsaKey } from "../keys.js";
 
 const args = process.argv.slice(2);
 const dryRun = args.includes("--dry-run");

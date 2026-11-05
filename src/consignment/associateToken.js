@@ -6,7 +6,7 @@
  * before consignToMerchant.js (which also does it for the merchant).
  *
  * Run from the command line:
- * node src/associateToken.js <merchant|buyer> [--dry-run]
+ * node src/consignment/associateToken.js <merchant|buyer> [--dry-run]
  *
  * Uses <ROLE>_ID and <ROLE>_KEY from .env.testnet; the account's key signs and
  * UA (the operator) pays the fee. Testnet only: in production the account
@@ -15,8 +15,8 @@
 
 import dotenv from "dotenv";
 import { AccountId, Client, TokenId } from "@hashgraph/sdk";
-import { associateToken, roleProblems, ROLES } from "./consignment.js";
-import { parseEcdsaKey } from "./uminaToken.js";
+import { associateToken, roleProblems, ROLES } from "./lib.js";
+import { parseEcdsaKey } from "../keys.js";
 
 const args = process.argv.slice(2);
 const dryRun = args.includes("--dry-run");

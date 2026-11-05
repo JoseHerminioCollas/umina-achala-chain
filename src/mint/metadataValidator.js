@@ -3,7 +3,7 @@
  */
 import Ajv from "ajv";
 import addFormats from "ajv-formats";
-import schema from "../schema/hip412-umina-schema.json" with { type: "json" };
+import schema from "../../schema/hip412-umina-schema.json" with { type: "json" };
 
 const ajv = new Ajv({ allErrors: true, allowUnionTypes: true });
 addFormats(ajv);

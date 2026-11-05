@@ -14,7 +14,7 @@
  * their CIDs, the two lists are dropped, and the result is pinned.
  *
  * Run from the command line:
- * node src/mintUminaNFT.js [metadata-file | --form post-file] [--out dir] [--dry-run]
+ * node src/mint/mintUminaNFT.js [metadata-file | --form post-file] [--out dir] [--dry-run]
  *
  * With --form the input is a simulated mint form post (see formPost.js). The
  * metadata file is generated from it into --out (default generated/) and then
@@ -48,9 +48,9 @@ import {
   pinJson,
   samplesFolderProblem,
   validateMintEnv,
-} from "./mintUmina.js";
+} from "./lib.js";
 import { metadataFromForm, writeGeneratedMetadata } from "./formPost.js";
-import { parseEcdsaKey } from "./uminaToken.js";
+import { parseEcdsaKey } from "../keys.js";
 
 const args = process.argv.slice(2);
 const dryRun = args.includes("--dry-run");
@@ -73,8 +73,8 @@ async function main() {
     if (!formFile && !metadataFile) {
       console.error(
         "❌ Give a form post or a metadata file:\n" +
-          "   node src/mintUminaNFT.js --form json/sample-form-post.json [--out dir] [--dry-run]\n" +
-          "   node src/mintUminaNFT.js <metadata-file> [--dry-run]",
+          "   node src/mint/mintUminaNFT.js --form json/sample-form-post.json [--out dir] [--dry-run]\n" +
+          "   node src/mint/mintUminaNFT.js <metadata-file> [--dry-run]",
       );
       process.exitCode = 1;
       return;

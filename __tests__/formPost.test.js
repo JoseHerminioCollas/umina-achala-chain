@@ -1,7 +1,7 @@
 import fs from "fs";
 import os from "os";
 import path from "path";
-import { metadataFromForm, writeGeneratedMetadata } from "../src/formPost.js";
+import { metadataFromForm, writeGeneratedMetadata } from "../src/mint/formPost.js";
 
 const template = JSON.parse(fs.readFileSync("json/template.json", "utf8"));
 const example = JSON.parse(fs.readFileSync("json/example.json", "utf8"));

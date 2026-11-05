@@ -14,7 +14,7 @@ import {
   samplesFolderProblem,
   validateMintEnv,
   withPlaceholderAssets,
-} from "../src/mintUmina.js";
+} from "../src/mint/lib.js";
 
 const key = PrivateKey.generateECDSA().toStringDer();
 

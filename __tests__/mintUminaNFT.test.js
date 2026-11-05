@@ -1,6 +1,6 @@
 import fs from "fs";
-import { validateMetadata } from "../src/metadataValidator.js";
-import { withPlaceholderAssets } from "../src/mintUmina.js";
+import { validateMetadata } from "../src/mint/metadataValidator.js";
+import { withPlaceholderAssets } from "../src/mint/lib.js";
 
 describe("mintUminaNFT.js workflow", () => {
   test("validates metadata JSON against schema", () => {

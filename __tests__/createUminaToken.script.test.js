@@ -1,7 +1,7 @@
 import { jest } from "@jest/globals";
 import { PrivateKey } from "@hashgraph/sdk";
 
-// Runs src/createUminaToken.js itself (it calls main() on import) with dotenv
+// Runs src/token/createUminaToken.js itself (it calls main() on import) with dotenv
 // and the network client mocked, and records how it signs and executes.
 
 const key = PrivateKey.generateECDSA().toStringDer();
@@ -27,8 +27,8 @@ function mockDependencies({ executeError } = {}) {
     Client: { forTestnet: calls.forTestnet },
   }));
 
-  jest.doMock("../src/uminaToken.js", () => {
-    const actual = jest.requireActual("../src/uminaToken.js");
+  jest.doMock("../src/token/lib.js", () => {
+    const actual = jest.requireActual("../src/token/lib.js");
     const tx = {
       freezeWith: jest.fn(async () => tx),
       sign: jest.fn(async (k) => calls.signed.push(k.publicKey.toString())),
@@ -57,8 +57,8 @@ function setEnv(extra = {}) {
 }
 
 async function runScript(...args) {
-  process.argv = ["node", "src/createUminaToken.js", ...args];
-  await import("../src/createUminaToken.js");
+  process.argv = ["node", "src/token/createUminaToken.js", ...args];
+  await import("../src/token/createUminaToken.js");
   // main() is not awaited by the module, so let its promises settle
   await new Promise((resolve) => setImmediate(resolve));
 }

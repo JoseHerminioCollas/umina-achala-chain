@@ -1,12 +1,12 @@
 /**
- * @file mintUmina.js
+ * @file mint/lib.js
  * @description Environment checks, stone_id check and the Pinata pin used by
  * mintUminaNFT.js, kept apart from it so they can be tested without a network.
  */
 
 import fs from "fs";
 import path from "path";
-import { parseEcdsaKey } from "./uminaToken.js";
+import { parseEcdsaKey } from "../keys.js";
 
 const HEDERA_ID = /^0\.0\.\d+$/;
 // UMINA-YYYY-XX-NN, for example UMINA-2026-CH-03 (CH = chrysocolla)

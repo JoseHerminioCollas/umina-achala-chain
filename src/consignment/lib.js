@@ -1,5 +1,5 @@
 /**
- * @file consignment.js
+ * @file consignment/lib.js
  * @description Helpers for the Umiña consignment scripts (associateToken.js,
  * consignToMerchant.js, sellConsigned.js). See
  * umina-achala-documents/consignment.md.

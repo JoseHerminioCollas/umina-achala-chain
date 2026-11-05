@@ -1,12 +1,12 @@
 /**
  * Stand-alone validator for HIP-412 Umiña metadata
- * Usage: node src/validateMetadata.js json/example.json
+ * Usage: node src/mint/validateMetadata.js json/example.json
  */
 import fs from "fs";
 import Ajv from "ajv";
 import addFormats from "ajv-formats";
-import { withPlaceholderAssets } from "./mintUmina.js";
-import schema from "../schema/hip412-umina-schema.json" with { type: "json" };
+import { withPlaceholderAssets } from "./lib.js";
+import schema from "../../schema/hip412-umina-schema.json" with { type: "json" };
 
 const ajv = new Ajv({ allErrors: true, allowUnionTypes: true });
 addFormats(ajv);

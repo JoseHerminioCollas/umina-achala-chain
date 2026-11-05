@@ -6,7 +6,7 @@
  * NFT allowance so UA can sell it.
  *
  * Run from the command line:
- * node src/consignToMerchant.js <serial> [--dry-run]
+ * node src/consignment/consignToMerchant.js <serial> [--dry-run]
  *
  * Testnet only: the merchant's key is read from .env.testnet to simulate the
  * merchant signing. In production the merchant signs in their own wallet.
@@ -21,8 +21,8 @@ import {
   TokenId,
   TransferTransaction,
 } from "@hashgraph/sdk";
-import { associateToken, consignmentProblems } from "./consignment.js";
-import { parseEcdsaKey } from "./uminaToken.js";
+import { associateToken, consignmentProblems } from "./lib.js";
+import { parseEcdsaKey } from "../keys.js";
 
 const args = process.argv.slice(2);
 const dryRun = args.includes("--dry-run");

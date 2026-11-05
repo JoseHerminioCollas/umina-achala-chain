@@ -4,7 +4,7 @@ import {
   describeToken,
   loadKeys,
   validateEnv,
-} from "../src/uminaToken.js";
+} from "../src/token/lib.js";
 
 // Real SDK, no network: keys are generated and the transaction is only built.
 const operatorKey = PrivateKey.generateECDSA().toStringDer();

@@ -1,19 +1,19 @@
 /**
- * @file uminaToken.js
+ * @file token/lib.js
  * @description Environment checks and the TokenCreateTransaction for the
- * Umiña NFT class, kept apart from createUminaToken.js so they can be tested
- * without a network.
+ * Umiña NFT class, used by createUminaToken.js and kept apart from it so they
+ * can be tested without a network.
  */
 
 import {
   CustomFixedFee,
   CustomRoyaltyFee,
   Hbar,
-  PrivateKey,
   TokenCreateTransaction,
   TokenSupplyType,
   TokenType,
 } from "@hashgraph/sdk";
+import { parseEcdsaKey } from "../keys.js";
 
 export const TOKEN_NAME = "Umiña";
 export const TOKEN_SYMBOL = "UMINA";
@@ -32,22 +32,6 @@ const KEY_NAMES = [
   "PAUSE_KEY",
   "WIPE_KEY",
 ];
-
-/**
- * Parses an ECDSA private key given as raw 64-character hex or as DER. DER
- * input is checked for its type, because fromStringECDSA accepts an ED25519
- * DER key without complaint and it would only fail later when signing.
- */
-export function parseEcdsaKey(value) {
-  if (/^(0x)?[0-9a-fA-F]{64}$/.test(value)) {
-    return PrivateKey.fromStringECDSA(value);
-  }
-  const key = PrivateKey.fromStringDer(value);
-  if (key.type !== "secp256k1") {
-    throw new Error(`expected an ECDSA key, got ${key.type}`);
-  }
-  return key;
-}
 
 /**
  * Checks the environment and returns the problems found, each naming the

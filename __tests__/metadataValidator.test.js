@@ -1,6 +1,6 @@
 import fs from "fs";
-import { validateMetadata } from "../src/metadataValidator.js";
-import { withPlaceholderAssets } from "../src/mintUmina.js";
+import { validateMetadata } from "../src/mint/metadataValidator.js";
+import { withPlaceholderAssets } from "../src/mint/lib.js";
 
 // image and files are added at mint time, so check the template with placeholders
 const load = () =>

@@ -7,7 +7,7 @@
  * in HCS.
  *
  * Run from the command line:
- * node src/sellConsigned.js <serial> <price-hbar> [--dry-run]
+ * node src/consignment/sellConsigned.js <serial> <price-hbar> [--dry-run]
  *
  * UA (the operator) pays the fees and is the allowance spender, so the
  * merchant does not sign. The buyer signs because HBAR leaves their account;
@@ -27,8 +27,8 @@ import {
   TransactionId,
   TransferTransaction,
 } from "@hashgraph/sdk";
-import { consignmentProblems, consignmentSplit } from "./consignment.js";
-import { parseEcdsaKey } from "./uminaToken.js";
+import { consignmentProblems, consignmentSplit } from "./lib.js";
+import { parseEcdsaKey } from "../keys.js";
 
 const args = process.argv.slice(2);
 const dryRun = args.includes("--dry-run");

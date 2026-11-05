@@ -4,7 +4,7 @@
   "description": "Hedera HTS and HCS scripts for Peruvian gemstone tracking",
   "type": "module",
   "scripts": {
-    "validate": "node src/validateMetadata.js json/example.json",
+    "validate": "node src/mint/validateMetadata.js json/example.json",
     "test": "jest"
   },
   "dependencies": {

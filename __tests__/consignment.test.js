@@ -1,4 +1,4 @@
-import { consignmentProblems, consignmentSplit, roleProblems } from "../src/consignment.js";
+import { consignmentProblems, consignmentSplit, roleProblems } from "../src/consignment/lib.js";
 
 describe("roleProblems", () => {
   const base = { OPERATOR_ID: "0.0.1", OPERATOR_KEY: "k", UMINA_TOKEN_ID: "0.0.9" };

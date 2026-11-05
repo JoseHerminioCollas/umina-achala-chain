@@ -4,7 +4,7 @@ import os from "os";
 import path from "path";
 import { PrivateKey } from "@hashgraph/sdk";
 
-// Runs src/mintUminaNFT.js itself (it calls main() on import) with Hedera,
+// Runs src/mint/mintUminaNFT.js itself (it calls main() on import) with Hedera,
 // Pinata (fetch) and dotenv mocked, and records what it sends.
 
 const key = PrivateKey.generateECDSA().toStringDer();
@@ -86,8 +86,8 @@ function mockDependencies({ pinStatus = 200, mintError, hcsError } = {}) {
 }
 
 async function runScript(...args) {
-  process.argv = ["node", "src/mintUminaNFT.js", ...args];
-  await import("../src/mintUminaNFT.js");
+  process.argv = ["node", "src/mint/mintUminaNFT.js", ...args];
+  await import("../src/mint/mintUminaNFT.js");
   // main() is not awaited by the module, so let its promises settle
   await new Promise((resolve) => setImmediate(resolve));
 }
