@@ -1,5 +1,73 @@
 import { jest } from "@jest/globals";
-import { MIRROR_NODE, topicEvents } from "../src/mirror.js";
+import {
+  accountKey,
+  MIRROR_NODE,
+  mirrorTxId,
+  nftInfo,
+  normalizeTxId,
+  topicEvents,
+  topicInfo,
+  transactionRecord,
+} from "../src/mirror.js";
+
+const json = (status, body) =>
+  jest.fn().mockResolvedValue({ ok: status === 200, status, json: async () => body, text: async () => "err" });
+
+describe("transaction IDs", () => {
+  test("normalizeTxId takes either form and pads the nanoseconds", () => {
+    expect(normalizeTxId("0.0.1001@1700000000.5")).toBe("0.0.1001@1700000000.000000005");
+    expect(normalizeTxId("0.0.1001-1700000000-000000005")).toBe("0.0.1001@1700000000.000000005");
+    expect(normalizeTxId(" 0.0.1001@1700000000.000000005 ")).toBe("0.0.1001@1700000000.000000005");
+  });
+
+  test("normalizeTxId returns null for anything else", () => {
+    expect(normalizeTxId("0.0.1001")).toBeNull();
+    expect(normalizeTxId(undefined)).toBeNull();
+  });
+
+  test("mirrorTxId gives the mirror node form", () => {
+    expect(mirrorTxId("0.0.1001@1700000000.5")).toBe("0.0.1001-1700000000-000000005");
+  });
+});
+
+describe("lookups", () => {
+  test("transactionRecord asks for the mirror form and returns the parent record", async () => {
+    const fetchFn = json(200, {
+      transactions: [
+        { name: "child", parent_consensus_timestamp: "1.1" },
+        { name: "parent" },
+      ],
+    });
+    expect((await transactionRecord("0.0.1001@1700000000.5", fetchFn)).name).toBe("parent");
+    expect(fetchFn).toHaveBeenCalledWith(
+      `${MIRROR_NODE}/api/v1/transactions/0.0.1001-1700000000-000000005`,
+    );
+  });
+
+  test("transactionRecord returns null for an unknown transaction and refuses a bad ID", async () => {
+    expect(await transactionRecord("0.0.1@1.1", json(404))).toBeNull();
+    await expect(transactionRecord("nope", json(200, {}))).rejects.toThrow('not a transaction ID: "nope"');
+  });
+
+  test("nftInfo, accountKey and topicInfo return null on 404", async () => {
+    expect(await nftInfo("0.0.2002", 7, json(404))).toBeNull();
+    expect(await accountKey("0.0.6006", json(404))).toBeNull();
+    expect(await topicInfo("0.0.3003", json(404))).toBeNull();
+  });
+
+  test("nftInfo and accountKey read the right paths", async () => {
+    const nftFetch = json(200, { account_id: "0.0.6006" });
+    expect((await nftInfo("0.0.2002", 7, nftFetch)).account_id).toBe("0.0.6006");
+    expect(nftFetch).toHaveBeenCalledWith(`${MIRROR_NODE}/api/v1/tokens/0.0.2002/nfts/7`);
+    const keyFetch = json(200, { key: { _type: "ED25519", key: "ab" } });
+    expect(await accountKey("0.0.6006", keyFetch)).toEqual({ _type: "ED25519", key: "ab" });
+    expect(keyFetch).toHaveBeenCalledWith(`${MIRROR_NODE}/api/v1/accounts/0.0.6006`);
+  });
+
+  test("reports any other failed request", async () => {
+    await expect(nftInfo("0.0.2002", 7, json(500))).rejects.toThrow("mirror node request failed: 500 err");
+  });
+});
 
 const encode = (value) =>
   Buffer.from(typeof value === "string" ? value : JSON.stringify(value)).toString("base64");

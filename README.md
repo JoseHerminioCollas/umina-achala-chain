@@ -13,6 +13,7 @@ Hedera scripts for Umiña Achala: create the HTS token, validate HIP-412 metadat
 | `src/mint/` | `mintUminaNFT.js`, `validateMetadata.js` | `lib.js`, `formPost.js`, `metadataValidator.js` |
 | `src/consignment/` | `associateToken.js`, `consignToMerchant.js`, `sellConsigned.js` | `lib.js` |
 | `src/sale/` | `sellOwnItem.js` | `lib.js` |
+| `src/record/` | `recordEvent.js` | `lib.js` |
 | `src/` | | `keys.js` (ECDSA key parsing and the `TREASURY_KEY` check used by every script), `mirror.js` (reads HCS topic events from the testnet mirror node), `hcs.js` (builds HCS events with the envelope from umina-achala-chain#10, signs them with the optional `HCS_SUBMIT_KEY`, and waits for the receipt) |
 
 ## Scripts
@@ -30,6 +31,11 @@ Hedera scripts for Umiña Achala: create the HTS token, validate HIP-412 metadat
 - `src/consignment/lib.js` holds the 70/30 split, the token association and their env checks.
 - `src/sale/sellOwnItem.js` sells an NFT UA holds itself, straight from the Treasury, in one atomic transfer: the buyer pays the price in HBAR to UA and the Treasury sends the NFT, then the SALE message goes to HCS: `node src/sale/sellOwnItem.js <serial> <price-hbar> [--dry-run]`. It checks first that the Treasury still holds the serial. The buyer must have associated the token (`node src/consignment/associateToken.js buyer`). Testnet only; needs `BUYER_ID` and `BUYER_KEY`, and `TREASURY_KEY` when the Treasury is not the operator.
 - `src/sale/lib.js` holds its argument and env checks.
+- `src/record/recordEvent.js` records a SALE or DELIVERED event in the provenance topic for something that already happened, after checking it against the ledger on the mirror node (umina-achala-chain#8). It never moves an NFT or HBAR; `sellConsigned.js` and `sellOwnItem.js` record their own sales, so this covers sales made wallet to wallet, paid off-chain or on a marketplace, and deliveries.
+  - `node src/record/recordEvent.js sale <serial> --seller <id> --buyer <id> --nft-tx <tx-id> --payment <on_chain|off_chain> [--payment-tx <tx-id>] [--sold-for <amount> [--currency <code>]] [--stone-id <id>] [--dry-run]`: `--nft-tx` must show the serial going from the seller to the buyer; for `on_chain`, the buyer's HBAR payment must be in it or in `--payment-tx`, and must equal `--sold-for` when given; `off_chain` prices are recorded as stated. A SALE for the same `--nft-tx` is refused.
+  - `node src/record/recordEvent.js delivered <serial> --buyer <id> [--method in_person] [--delivered-at <date-time>] [--proof <file>] [--stone-id <id>] [--dry-run]`: the buyer must hold the NFT and have a SALE on the topic, which becomes the event's `ref`. `--proof` is optional: a JSON file `{ "message", "signature" }` where the message is the one `--dry-run` prints, signed by the buyer's account key; it is checked and its hash recorded (`proof: "signed"`). Without it the event says `proof: "none"`. A second DELIVERED for the same sale is refused.
+  - Every run reads the topic and the ledger; `--dry-run` does all the checks, prints the event and sends nothing.
+- `src/record/lib.js` holds the argument parsing, the ledger checks and the proof check.
 - `schema/hip412-umina-schema.json` is a copy of the schema in `umina-achala-web`.
 - `json/template.json` is the empty metadata template: fixed fields keep their values and everything else is `null`. The form post is copied into it and unfilled fields are removed. `json/example.json` is one filled-in record, kept for reference (no `image` or `files`; they are set at mint time). `json/sample-form-post.json` is a simulated form post.
 
