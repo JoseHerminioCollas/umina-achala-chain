@@ -12,7 +12,13 @@ const calls = {};
 
 // A mock transaction class: every setter records its arguments and returns
 // the transaction; sign records the key; execute records the step.
-function mockTransaction(name, { executeError } = {}) {
+const TX_IDS = {
+  transfer: "0.0.1001@1700000000.000000002",
+  approve: "0.0.1001@1700000000.000000003",
+  hcs: "0.0.1001@1700000000.000000004",
+};
+
+function mockTransaction(name, { executeError, receiptError } = {}) {
   return jest.fn().mockImplementation(() => {
     const record = { name, set: {}, signed: [] };
     const tx = new Proxy(
@@ -27,7 +33,13 @@ function mockTransaction(name, { executeError } = {}) {
             return async () => {
               calls.steps.push(record);
               if (executeError) throw executeError;
-              return { getReceipt: async () => ({ status: Status.Success }) };
+              return {
+                transactionId: { toString: () => TX_IDS[name] ?? "0.0.1001@1.1" },
+                getReceipt: async () => {
+                  if (receiptError) throw receiptError;
+                  return { status: Status.Success };
+                },
+              };
             };
           return (...a) => ((record.set[prop] = a.map(String)), tx);
         },
@@ -37,7 +49,7 @@ function mockTransaction(name, { executeError } = {}) {
   });
 }
 
-function mockDependencies({ alreadyAssociated = false, transferError } = {}) {
+function mockDependencies({ alreadyAssociated = false, transferError, approveError, hcsReceiptError } = {}) {
   calls.steps = [];
   calls.close = jest.fn();
   calls.forTestnet = jest.fn(() => ({ setOperator: jest.fn().mockReturnThis(), close: calls.close }));
@@ -52,7 +64,8 @@ function mockDependencies({ alreadyAssociated = false, transferError } = {}) {
         executeError: alreadyAssociated ? alreadyAssociatedError(actual) : undefined,
       }),
       TransferTransaction: mockTransaction("transfer", { executeError: transferError }),
-      AccountAllowanceApproveTransaction: mockTransaction("approve"),
+      AccountAllowanceApproveTransaction: mockTransaction("approve", { executeError: approveError }),
+      TopicMessageSubmitTransaction: mockTransaction("hcs", { receiptError: hcsReceiptError }),
     };
   });
 }
@@ -82,8 +95,10 @@ describe("consignToMerchant.js", () => {
       UMINA_TOKEN_ID: "0.0.2002",
       MERCHANT_ID: "0.0.4004",
       MERCHANT_KEY: merchantKey.toStringDer(),
+      HCS_TOPIC_ID: "0.0.3003",
     });
     delete process.env.TREASURY_KEY;
+    delete process.env.HCS_SUBMIT_KEY;
     jest.spyOn(console, "log").mockImplementation(() => {});
     jest.spyOn(console, "error").mockImplementation(() => {});
     process.exitCode = undefined;
@@ -100,7 +115,7 @@ describe("consignToMerchant.js", () => {
     mockDependencies();
     await runScript("7");
 
-    expect(calls.steps.map((s) => s.name)).toEqual(["associate", "transfer", "approve"]);
+    expect(calls.steps.map((s) => s.name)).toEqual(["associate", "transfer", "approve", "hcs"]);
     const [associate, transfer, approve] = calls.steps;
     expect(associate.set.setAccountId).toEqual(["0.0.4004"]);
     expect(associate.signed).toEqual([pub(merchantKey)]);
@@ -112,11 +127,61 @@ describe("consignToMerchant.js", () => {
     expect(calls.close).toHaveBeenCalled();
   });
 
+  test("records ISSUED_TO_OWNER after the transfer and the allowance, with the transfer as ref", async () => {
+    mockDependencies();
+    await runScript("7");
+
+    const hcs = calls.steps.find((s) => s.name === "hcs");
+    expect(hcs.set.setTopicId).toEqual(["0.0.3003"]);
+    expect(JSON.parse(hcs.set.setMessage[0])).toEqual({
+      event: "ISSUED_TO_OWNER",
+      schema_version: 1,
+      token_id: "0.0.2002",
+      serials: ["7"],
+      actor_id: "0.0.1001",
+      occurred_at: expect.stringMatching(/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/),
+      ref: TX_IDS.transfer,
+      to_id: "0.0.4004",
+      allowance_ref: TX_IDS.approve,
+    });
+    expect(hcs.signed).toEqual([]);
+  });
+
+  test("signs ISSUED_TO_OWNER with HCS_SUBMIT_KEY when it is set", async () => {
+    const submitKey = PrivateKey.generateECDSA();
+    process.env.HCS_SUBMIT_KEY = submitKey.toStringDer();
+    mockDependencies();
+    await runScript("7");
+
+    expect(calls.steps.find((s) => s.name === "hcs").signed).toEqual([pub(submitKey)]);
+  });
+
+  test("says the NFT already moved when the allowance fails, and records nothing", async () => {
+    mockDependencies({ approveError: new Error("INVALID_SIGNATURE") });
+    await runScript("7");
+
+    expect(calls.steps.map((s) => s.name)).toEqual(["associate", "transfer", "approve"]);
+    expect(console.error).toHaveBeenCalledWith(
+      `   The NFT already moved to the merchant in ${TX_IDS.transfer}, but ISSUED_TO_OWNER was not recorded.`,
+    );
+    expect(process.exitCode).toBe(1);
+  });
+
+  test("says the NFT already moved when the event is rejected at consensus", async () => {
+    mockDependencies({ hcsReceiptError: new Error("INVALID_SIGNATURE") });
+    await runScript("7");
+
+    expect(console.error).toHaveBeenCalledWith(
+      `   The NFT already moved to the merchant in ${TX_IDS.transfer}, but ISSUED_TO_OWNER was not recorded.`,
+    );
+    expect(process.exitCode).toBe(1);
+  });
+
   test("carries on when the merchant has already associated the token", async () => {
     mockDependencies({ alreadyAssociated: true });
     await runScript("7");
 
-    expect(calls.steps.map((s) => s.name)).toEqual(["associate", "transfer", "approve"]);
+    expect(calls.steps.map((s) => s.name)).toEqual(["associate", "transfer", "approve", "hcs"]);
     expect(process.exitCode).toBeUndefined();
   });
 
@@ -183,7 +248,17 @@ describe("consignToMerchant.js", () => {
     await runScript("7");
 
     expect(calls.steps.map((s) => s.name)).toEqual(["associate", "transfer"]);
+    expect(console.error).not.toHaveBeenCalledWith(expect.stringContaining("already moved"));
     expect(process.exitCode).toBe(1);
     expect(calls.close).toHaveBeenCalled();
+  });
+
+  test("requires HCS_TOPIC_ID", async () => {
+    delete process.env.HCS_TOPIC_ID;
+    mockDependencies();
+    await runScript("7");
+
+    expect(console.error).toHaveBeenCalledWith("   - HCS_TOPIC_ID is not set");
+    expect(calls.steps).toEqual([]);
   });
 });

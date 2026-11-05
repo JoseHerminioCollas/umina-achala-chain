@@ -2,11 +2,16 @@
  * @file consignToMerchant.js
  * @description Consigns a minted Umiña NFT serial to a merchant on Hedera
  * TESTNET: the merchant associates the Umiña token, the treasury transfers the
- * serial to the merchant, and the merchant grants UA (the operator account) an
- * NFT allowance so UA can sell it.
+ * serial to the merchant, the merchant grants UA (the operator account) an
+ * NFT allowance so UA can sell it, and the transfer is recorded in HCS as
+ * ISSUED_TO_OWNER (umina-achala-chain#10, #18).
  *
  * Run from the command line:
  * node src/consignment/consignToMerchant.js <serial> [--dry-run]
+ *
+ * The event is recorded only after the transfer and the allowance have both
+ * succeeded. If a step fails after the NFT has moved, the script says what
+ * already happened on the ledger, so it can be finished or recorded by hand.
  *
  * Testnet only: the merchant's key is read from .env.testnet to simulate the
  * merchant signing. In production the merchant signs in their own wallet.
@@ -23,6 +28,7 @@ import {
 } from "@hashgraph/sdk";
 import { associateToken, consignmentProblems } from "./lib.js";
 import { parseEcdsaKey, treasuryKeyProblem } from "../keys.js";
+import { buildEvent, loadSubmitKey, submitEvent, submitKeyProblem } from "../hcs.js";
 
 const args = process.argv.slice(2);
 const dryRun = args.includes("--dry-run");
@@ -34,17 +40,20 @@ const REQUIRED = [
   "OPERATOR_KEY",
   "TREASURY_ID",
   "UMINA_TOKEN_ID",
+  "HCS_TOPIC_ID",
   "MERCHANT_ID",
   "MERCHANT_KEY",
 ];
 
 async function main() {
   let client;
+  let transferTxId;
   try {
     // --- 1. Check the arguments and environment ---
     const problems = consignmentProblems(process.env, REQUIRED, serial);
-    const treasuryProblem = treasuryKeyProblem(process.env);
-    if (treasuryProblem) problems.push(treasuryProblem);
+    for (const problem of [treasuryKeyProblem(process.env), submitKeyProblem(process.env)]) {
+      if (problem) problems.push(problem);
+    }
     if (problems.length) {
       console.error("❌ Problems found:");
       problems.forEach((p) => console.error(`   - ${p}`));
@@ -66,6 +75,7 @@ async function main() {
       console.log(`Would associate ${tokenId} with ${merchantId}`);
       console.log(`Would transfer ${nftId} from ${treasuryId} to ${merchantId}`);
       console.log(`Would approve ${operatorId} to sell ${nftId} for ${merchantId}`);
+      console.log(`Would record ISSUED_TO_OWNER to ${merchantId} in ${process.env.HCS_TOPIC_ID}`);
       console.log("Dry run, nothing sent.");
       return;
     }
@@ -89,18 +99,40 @@ async function main() {
       .addNftTransfer(nftId, treasuryId, merchantId)
       .freezeWith(client);
     if (treasuryKey) transferTx = await transferTx.sign(treasuryKey);
-    const transferReceipt = await (await transferTx.execute(client)).getReceipt(client);
-    console.log(`✅ ${nftId} transferred to ${merchantId}: ${transferReceipt.status}`);
+    const transferResponse = await transferTx.execute(client);
+    const transferReceipt = await transferResponse.getReceipt(client);
+    transferTxId = transferResponse.transactionId.toString();
+    console.log(`✅ ${nftId} transferred to ${merchantId}: ${transferReceipt.status} (${transferTxId})`);
 
     // --- 5. Merchant grants UA an allowance on this serial (merchant signs) ---
     const approveTx = await new AccountAllowanceApproveTransaction()
       .approveTokenNftAllowance(nftId, merchantId, operatorId)
       .freezeWith(client)
       .sign(merchantKey);
-    const approveReceipt = await (await approveTx.execute(client)).getReceipt(client);
-    console.log(`✅ ${operatorId} may now sell ${nftId}: ${approveReceipt.status}`);
+    const approveResponse = await approveTx.execute(client);
+    const approveReceipt = await approveResponse.getReceipt(client);
+    const approveTxId = approveResponse.transactionId.toString();
+    console.log(`✅ ${operatorId} may now sell ${nftId}: ${approveReceipt.status} (${approveTxId})`);
+
+    // --- 6. Record the transfer to the owner in HCS ---
+    const message = buildEvent(
+      { event: "ISSUED_TO_OWNER", tokenId, serials: [serial], actorId: operatorId, ref: transferTxId },
+      { to_id: merchantId.toString(), allowance_ref: approveTxId },
+    );
+    const hcsTxId = await submitEvent(
+      client,
+      process.env.HCS_TOPIC_ID,
+      message,
+      loadSubmitKey(process.env),
+    );
+    console.log(`✅ ISSUED_TO_OWNER recorded: ${hcsTxId}`);
   } catch (err) {
     console.error("❌ Consignment failed:", err);
+    if (transferTxId) {
+      console.error(
+        `   The NFT already moved to the merchant in ${transferTxId}, but ISSUED_TO_OWNER was not recorded.`,
+      );
+    }
     process.exitCode = 1;
   } finally {
     client?.close();
