@@ -8,7 +8,7 @@ Hedera scripts for Umiña Achala: create the HTS token, validate HIP-412 metadat
 
 | Folder | Scripts | Helpers |
 |---|---|---|
-| `src/token/` | `createUminaToken.js` | `lib.js` |
+| `src/token/` | `createUminaToken.js`, `adminToken.js` | `lib.js` |
 | `src/topic/` | `createUminaTopic.js` | `lib.js` |
 | `src/mint/` | `mintUminaNFT.js`, `validateMetadata.js` | `lib.js`, `formPost.js`, `metadataValidator.js` |
 | `src/consignment/` | `associateToken.js`, `consignToMerchant.js`, `sellConsigned.js`, `endConsignment.js` | `lib.js` |
@@ -19,7 +19,8 @@ Hedera scripts for Umiña Achala: create the HTS token, validate HIP-412 metadat
 ## Scripts
 
 - `src/token/createUminaToken.js` creates the HTS token on testnet: `node src/token/createUminaToken.js [env-file] [--dry-run]`. The env file defaults to `.env.testnet`. `--dry-run` checks it and prints the token parameters (no keys, no network). The token gets a 5% royalty to the treasury with a fallback fee of `FALLBACK_FEE_HBAR` HBAR (about USD 3, converted on the day of creation), and no metadata key, so NFT metadata is immutable. It prints the new token ID; save it as `UMINA_TOKEN_ID`.
-- `src/token/lib.js` holds its env checks and the token transaction.
+- `src/token/lib.js` holds its env checks and the token transaction, the royalty fee shared with the fee update, and the admin command checks.
+- `src/token/adminToken.js` uses the token's admin keys on testnet (umina-achala-chain#21), each command signed by its own key: `fees --fallback-hbar <hbar> [--royalty <percent>]` (`FEE_SCHEDULE_KEY`) replaces the royalty and fallback fee, e.g. when the HBAR price has moved the fallback fee away from about USD 3; `pause` / `unpause` (`PAUSE_KEY`) stops or allows every transfer; `wipe <serial> --account <id> --reason <text>` (`WIPE_KEY`) removes a serial from the account that holds it; `burn <serial> --reason <text>` (`SUPPLY_KEY`) burns a serial still in the treasury. wipe and burn check the holder first and record a `BURN` event (reason, `method`, and for wipe `from_id`); the reason is public and permanent, so no personal data. fees and pause record no event. `--dry-run` sends nothing: `node src/token/adminToken.js <command> [serial] [options] [--dry-run]`.
 - `src/topic/createUminaTopic.js` creates an HCS topic on testnet: `node src/topic/createUminaTopic.js <provenance|display> [env-file] [--force] [--dry-run]`. `provenance` holds the item's history (MINT, SALE, ...) and is saved as `HCS_TOPIC_ID`; `display` holds what the site shows and is saved as `HCS_DISPLAY_TOPIC_ID` (data model: umina-achala-chain#10). The topic gets the public half of `HCS_SUBMIT_KEY` as its submit key, so only messages signed with it are accepted, and `HCS_ADMIN_KEY` as its admin key; both are required, and on testnet can be the operator key. A real run first checks the mirror node and refuses when the env variable already names an existing topic (`--force` skips this; a placeholder ID that does not exist is fine). `--dry-run` prints the topic parameters without keys and without touching the network. It prints the new topic ID; save it under the variable it names.
 - `src/topic/lib.js` holds its env checks, the topic transaction and the existing-topic check.
 - `src/mint/validateMetadata.js` validates a metadata file: `npm run validate`.
