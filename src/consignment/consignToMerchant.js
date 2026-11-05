@@ -22,7 +22,7 @@ import {
   TransferTransaction,
 } from "@hashgraph/sdk";
 import { associateToken, consignmentProblems } from "./lib.js";
-import { parseEcdsaKey } from "../keys.js";
+import { parseEcdsaKey, treasuryKeyProblem } from "../keys.js";
 
 const args = process.argv.slice(2);
 const dryRun = args.includes("--dry-run");
@@ -43,6 +43,8 @@ async function main() {
   try {
     // --- 1. Check the arguments and environment ---
     const problems = consignmentProblems(process.env, REQUIRED, serial);
+    const treasuryProblem = treasuryKeyProblem(process.env);
+    if (treasuryProblem) problems.push(treasuryProblem);
     if (problems.length) {
       console.error("❌ Problems found:");
       problems.forEach((p) => console.error(`   - ${p}`));

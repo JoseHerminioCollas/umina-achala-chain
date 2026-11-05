@@ -20,3 +20,19 @@ export function parseEcdsaKey(value) {
   }
   return key;
 }
+
+/**
+ * Returns a problem message about TREASURY_KEY, or null. It is needed only
+ * when the treasury is not the operator account, because a transfer out of
+ * the treasury must then be signed by the treasury's own key.
+ */
+export function treasuryKeyProblem(env) {
+  if (env.TREASURY_ID === env.OPERATOR_ID) return null;
+  if (!env.TREASURY_KEY) return "TREASURY_KEY is required when TREASURY_ID is not OPERATOR_ID";
+  try {
+    parseEcdsaKey(env.TREASURY_KEY);
+    return null;
+  } catch {
+    return "TREASURY_KEY is not an ECDSA private key (hex or DER)";
+  }
+}
