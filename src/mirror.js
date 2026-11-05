@@ -7,6 +7,22 @@
 export const MIRROR_NODE = "https://testnet.mirrornode.hedera.com";
 
 /**
+ * Returns a topic's details from the mirror node (memo, keys, deleted), or
+ * null when the topic does not exist.
+ * @param {string} topicId
+ * @param {typeof fetch} [fetchFn]
+ * @returns {Promise<object | null>}
+ */
+export async function topicInfo(topicId, fetchFn = fetch) {
+  const response = await fetchFn(`${MIRROR_NODE}/api/v1/topics/${topicId}`);
+  if (response.status === 404) return null;
+  if (!response.ok) {
+    throw new Error(`mirror node request failed: ${response.status} ${await response.text()}`);
+  }
+  return response.json();
+}
+
+/**
  * Reads every message on an HCS topic, oldest first, and returns the ones
  * that are JSON objects (events), each with its sequence number. Messages
  * that are not JSON are skipped. Throws when the topic does not exist.
