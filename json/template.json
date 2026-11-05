@@ -6,6 +6,9 @@
   "metadata_version": "1.0.0",
   "properties": {
     "stone_id": null,
+    "stone_type": null,
+    "specimen_form": null,
+    "materials": null,
     "hs_code": null,
     "jurisdiction": null,
     "legal_uri": null,
@@ -26,8 +29,7 @@
     "export_status": {
       "is_exported": null,
       "export_timestamp": null,
-      "export_permit_id": null,
-      "current_location": null
+      "export_permit_id": null
     },
     "store_receipt_hash": null,
     "sinceramiento_status": null,

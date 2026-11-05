@@ -6,13 +6,15 @@
   "metadata_version": "1.0.0",
   "properties": {
     "stone_id": "UMINA-2026-CH-03",
+    "stone_type": "chrysocolla",
+    "specimen_form": "worked",
     "hs_code": "7103.99.00.00",
     "jurisdiction": "Peru",
     "legal_uri": "https://umina-achala.pe/",
-    "vendor_ruc": "20999887766",
+    "vendor_ruc": "20999887768",
     "artisan_rna": "RNA-112233",
-    "mining_concession": "Arequipa-Chrys-03",
-    "reinfo_id": "PERU-MIN-445566",
+    "mining_concession": "010253815",
+    "reinfo_id": "10456789124",
     "reinfo_status": "Vigente",
     "cod_reference": "VUCE-ORIGIN-2026-003",
     "standard_compliance": "DS Nº 014-92-EM",
@@ -26,8 +28,7 @@
     "export_status": {
       "is_exported": false,
       "export_timestamp": null,
-      "export_permit_id": "VUCE-2026-EXP-100",
-      "current_location": "Peru - Pending Export"
+      "export_permit_id": "VUCE-2026-EXP-100"
     },
     "store_receipt_hash": "sha256-abc123def456...",
     "sinceramiento_status": "Verified (Georeferenced)",
@@ -37,7 +38,6 @@
     "mounted_by_id": ""
   },
   "attributes": [
-    { "trait_type": "Stone Type", "value": "Chrysocolla" },
     { "trait_type": "HS Code", "value": "7103.99.00.00" },
     { "trait_type": "Weight", "value": "8.7 carats" },
     { "trait_type": "Grading", "value": "Collector Grade" },
@@ -46,7 +46,7 @@
     { "trait_type": "Cut By", "value": "ARTISAN-567" },
     { "trait_type": "Mounted By", "value": "" },
     { "trait_type": "Mount Technique", "value": "Wire Wrapping" },
-    { "trait_type": "Mining Concession", "value": "Arequipa-Chrys-03" },
+    { "trait_type": "Mining Concession", "value": "010253815" },
     {
       "trait_type": "Legal Status",
       "value": "Certified Origin & Artisan Transformation"
@@ -54,7 +54,6 @@
     {
       "trait_type": "Verification Level",
       "value": "Full 2026 Compliance (Mine-to-Artisan)"
-    },
-    { "trait_type": "Current Location", "value": "Peru" }
+    }
   ]
 }

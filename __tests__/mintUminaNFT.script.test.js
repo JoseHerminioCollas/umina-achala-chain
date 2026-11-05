@@ -15,6 +15,7 @@ function mockDependencies({
   mintError,
   hcsError,
   hcsReceiptError,
+  complianceError,
   mirrorStatus = 200,
   topicEvents = [],
 } = {}) {
@@ -63,6 +64,17 @@ function mockDependencies({
         freezeWith: jest.fn(() => tx),
         sign: jest.fn(async (k) => (calls.hcs.signed.push(k.publicKey.toString()), tx)),
         execute: jest.fn(async () => {
+          // The COMPLIANCE event before pinning is recorded apart from MINT,
+          // and the hcs errors apply to MINT only
+          if (calls.hcs.message.event === "COMPLIANCE") {
+            calls.order.push("compliance");
+            calls.compliance = calls.hcs;
+            if (complianceError) throw complianceError;
+            return {
+              transactionId: { toString: () => "0.0.1001@1699999999.000000000" },
+              getReceipt: async () => ({ status: "SUCCESS" }),
+            };
+          }
           calls.order.push("hcs");
           if (hcsError) throw hcsError;
           return {
@@ -177,7 +189,7 @@ describe("mintUminaNFT.js", () => {
     mockDependencies();
     await runScript(writeMetadata());
 
-    expect(calls.order).toEqual(["pinFile", "pinFile", "pin", "mint", "hcs"]);
+    expect(calls.order).toEqual(["compliance", "pinFile", "pinFile", "pin", "mint", "hcs"]);
     expect(process.exitCode).toBeUndefined();
     expect(calls.close).toHaveBeenCalled();
   });
@@ -274,12 +286,90 @@ describe("mintUminaNFT.js", () => {
     mockDependencies({ hcsReceiptError: new Error("INVALID_SIGNATURE") });
     await runScript(writeMetadata());
 
-    expect(calls.order).toEqual(["pinFile", "pinFile", "pin", "mint", "hcs"]);
+    expect(calls.order).toEqual(["compliance", "pinFile", "pinFile", "pin", "mint", "hcs"]);
     expect(console.error).toHaveBeenCalledWith(
       expect.stringContaining("but the HCS notarization failed"),
       expect.objectContaining({ message: "INVALID_SIGNATURE" }),
     );
     expect(console.table).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(1);
+  });
+
+  test("records COMPLIANCE before pinning and puts its ID in compliance_proof_hcs", async () => {
+    mockDependencies();
+    await runScript(writeMetadata());
+
+    expect(calls.order[0]).toBe("compliance");
+    expect(calls.compliance.message).toMatchObject({
+      event: "COMPLIANCE",
+      stone_id: "UMINA-2026-CH-03",
+      serials: [],
+      stone_type: "chrysocolla",
+      vendor_ruc: "20999887768",
+      mining_concession: "010253815",
+      reinfo_id: "10456789124",
+      hs_code: "7103.99.00.00",
+    });
+    expect(calls.pin.body.pinataContent.properties).toMatchObject({
+      compliance_proof_hcs: "0.0.1001@1699999999.000000000",
+      hcs_compliance_topic: "0.0.3003",
+    });
+  });
+
+  test("pins nothing when COMPLIANCE cannot be recorded", async () => {
+    mockDependencies({ complianceError: new Error("INVALID_SIGNATURE") });
+    await runScript(writeMetadata());
+
+    expect(calls.order).toEqual(["compliance"]);
+    expect(console.error).toHaveBeenCalledWith(
+      "❌ Could not record COMPLIANCE for UMINA-2026-CH-03; nothing was pinned or minted:",
+      expect.any(Error),
+    );
+    expect(process.exitCode).toBe(1);
+  });
+
+  test("writes Stone Type, Materials and Form from the list, replacing hand-written ones", async () => {
+    mockDependencies();
+    await runScript(
+      writeMetadata((m) => {
+        m.properties.stone_type = "quartz";
+        m.properties.specimen_form = "natural";
+        m.properties.materials = [
+          { stone_type: "quartz", role: "host", form: "crystal" },
+          { stone_type: "gold", role: "inclusion", form: "leaf", weight_g: 0.4 },
+        ];
+        m.attributes.unshift({ trait_type: "Stone Type", value: "Quarts" });
+      }),
+    );
+
+    const attributes = calls.pin.body.pinataContent.attributes;
+    expect(attributes.slice(0, 3)).toEqual([
+      { trait_type: "Stone Type", value: "Quartz" },
+      { trait_type: "Materials", value: "Quartz, Gold" },
+      { trait_type: "Form", value: "Natural" },
+    ]);
+    expect(attributes.filter((a) => a.trait_type === "Stone Type")).toHaveLength(1);
+  });
+
+  test.each([
+    ["a stone type not in the list", (m) => (m.properties.stone_type = "unobtainium"), /"unobtainium" is not in schema\/stone-types.json/],
+    ["a fossil", (m) => (m.properties.stone_type = "ammonite"), /"ammonite" is a fossil; fossils are not minted/],
+    ["a fossil among the materials", (m) => (m.properties.materials = [
+      { stone_type: "chrysocolla", role: "host" },
+      { stone_type: "petrified_wood", role: "inclusion" },
+    ]), /petrified_wood" is a fossil/],
+    ["a RUC with a wrong check digit", (m) => (m.properties.vendor_ruc = "20999887766"), /not a valid RUC/],
+    ["a RUC that is not 11 digits", (m) => (m.properties.vendor_ruc = "2099988"), /vendor_ruc/],
+    ["a REINFO ID that is not a RUC", (m) => (m.properties.reinfo_id = "PERU-MIN-445566"), /reinfo_id/],
+    ["a REINFO RUC with a wrong check digit", (m) => (m.properties.reinfo_id = "10456789120"), /reinfo_id .*not a valid RUC/],
+    ["a concession code that is not 9 digits", (m) => (m.properties.mining_concession = "Arequipa-Chrys-03"), /mining_concession/],
+    ["a missing stone type", (m) => delete m.properties.stone_type, /stone_type/],
+  ])("refuses %s before anything is sent", async (_, change, message) => {
+    mockDependencies();
+    await runScript(writeMetadata(change));
+
+    expect(console.error).toHaveBeenCalledWith(expect.stringMatching(message));
+    expect(calls.order).toEqual([]);
     expect(process.exitCode).toBe(1);
   });
 
@@ -352,7 +442,7 @@ describe("mintUminaNFT.js", () => {
     mockDependencies({ pinStatus: 401 });
     await runScript(writeMetadata());
 
-    expect(calls.order).toEqual(["pinFile"]);
+    expect(calls.order).toEqual(["compliance", "pinFile"]);
     expect(process.exitCode).toBe(1);
     expect(calls.close).toHaveBeenCalled();
   });
@@ -361,7 +451,7 @@ describe("mintUminaNFT.js", () => {
     mockDependencies({ mintError: new Error("TOKEN_HAS_NO_SUPPLY_KEY") });
     await runScript(writeMetadata());
 
-    expect(calls.order).toEqual(["pinFile", "pinFile", "pin", "mint"]);
+    expect(calls.order).toEqual(["compliance", "pinFile", "pinFile", "pin", "mint"]);
     expect(process.exitCode).toBe(1);
     expect(calls.close).toHaveBeenCalled();
   });
@@ -425,7 +515,7 @@ describe("mintUminaNFT.js", () => {
     });
     await runScript(writeMetadata());
 
-    expect(calls.order).toEqual(["pinFile", "pinFile", "pin", "mint", "hcs"]);
+    expect(calls.order).toEqual(["compliance", "pinFile", "pinFile", "pin", "mint", "hcs"]);
   });
 
   test("--force mints a stone_id that already has a MINT event", async () => {
@@ -434,7 +524,7 @@ describe("mintUminaNFT.js", () => {
     });
     await runScript(writeMetadata(), "--force");
 
-    expect(calls.order).toEqual(["pinFile", "pinFile", "pin", "mint", "hcs"]);
+    expect(calls.order).toEqual(["compliance", "pinFile", "pinFile", "pin", "mint", "hcs"]);
     expect(process.exitCode).toBeUndefined();
   });
 
@@ -460,7 +550,7 @@ describe("mintUminaNFT.js", () => {
     mockDependencies({ hcsError: new Error("TOPIC_EXPIRED") });
     await runScript(writeMetadata());
 
-    expect(calls.order).toEqual(["pinFile", "pinFile", "pin", "mint", "hcs"]);
+    expect(calls.order).toEqual(["compliance", "pinFile", "pinFile", "pin", "mint", "hcs"]);
     expect(console.error).toHaveBeenCalledWith(
       expect.stringContaining("Minted serials 7 (ipfs://QmMockCID12345)"),
       expect.any(Error),
@@ -473,7 +563,7 @@ describe("mintUminaNFT.js", () => {
     mockDependencies();
     await runScript(writeMetadata(() => {}, ["thumb.jpg"], ["receipt.pdf", "permit.pdf"]));
 
-    expect(calls.order).toEqual(["pinFile", "pinFile", "pinFile", "pin", "mint", "hcs"]);
+    expect(calls.order).toEqual(["compliance", "pinFile", "pinFile", "pinFile", "pin", "mint", "hcs"]);
     expect(calls.files.map((f) => [f.name, f.type])).toEqual([
       ["thumb.jpg", "image/jpeg"],
       ["receipt.pdf", "application/pdf"],
@@ -526,13 +616,16 @@ describe("mintUminaNFT.js", () => {
       name: "Stone from the form",
       description: "Posted through the mint form",
       stone_id: "UMINA-2026-CH-77",
+      stone_type: "chrysocolla",
+      specimen_form: "worked",
       hs_code: "7103.99.00.00",
       jurisdiction: "Peru",
       legal_uri: "https://umina-achala.pe/",
-      vendor_ruc: "20999887766",
-      mining_concession: "Arequipa-Chrys-03",
-      reinfo_id: "PERU-MIN-445566",
-      attributes: { "Stone Type": "Chrysocolla" },
+      vendor_ruc: "20999887768",
+      mining_concession: "010253815",
+      reinfo_id: "10456789124",
+      // A hand-written Stone Type is replaced by the one from the list
+      attributes: { "Stone Type": "chrysocola (typo)" },
       images: [{ file: "thumb.jpg", description: "Front view" }],
       documents: [{ file: "receipt.pdf", description: "Store receipt" }],
     };
@@ -551,10 +644,13 @@ describe("mintUminaNFT.js", () => {
     expect(generated.properties.stone_id).toBe("UMINA-2026-CH-77");
     expect(generated.images[0].file).toBe(path.join(path.dirname(file), "thumb.jpg"));
 
-    expect(calls.order).toEqual(["pinFile", "pinFile", "pin", "mint", "hcs"]);
+    expect(calls.order).toEqual(["compliance", "pinFile", "pinFile", "pin", "mint", "hcs"]);
     const pinned = calls.pin.body.pinataContent;
     expect(pinned.name).toBe("Stone from the form");
-    expect(pinned.attributes).toEqual([{ trait_type: "Stone Type", value: "Chrysocolla" }]);
+    expect(pinned.attributes).toEqual([
+      { trait_type: "Stone Type", value: "Chrysocolla" },
+      { trait_type: "Form", value: "Worked" },
+    ]);
     expect(pinned.files.map((f) => f.metadata.description)).toEqual(["Front view", "Store receipt"]);
     expect(calls.hcs.message.stone_id).toBe("UMINA-2026-CH-77");
     expect(process.exitCode).toBeUndefined();

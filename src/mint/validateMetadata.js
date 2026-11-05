@@ -1,16 +1,11 @@
 /**
- * Stand-alone validator for HIP-412 Umiña metadata
+ * Stand-alone validator for HIP-412 Umiña metadata: the schema plus the
+ * stone type and RUC checks (see metadataValidator.js).
  * Usage: node src/mint/validateMetadata.js json/example.json
  */
 import fs from "fs";
-import Ajv from "ajv";
-import addFormats from "ajv-formats";
 import { withPlaceholderAssets } from "./lib.js";
-import schema from "../../schema/hip412-umina-schema.json" with { type: "json" };
-
-const ajv = new Ajv({ allErrors: true, allowUnionTypes: true });
-addFormats(ajv);
-const validate = ajv.compile(schema);
+import { validateMetadata } from "./metadataValidator.js";
 
 const filePath = process.argv[2];
 if (!filePath) {
@@ -20,11 +15,11 @@ if (!filePath) {
 
 const metadata = JSON.parse(fs.readFileSync(filePath, "utf8"));
 // image and files are filled in at mint time, so check with placeholders
-const valid = validate(withPlaceholderAssets(metadata));
+const { valid, errors } = validateMetadata(withPlaceholderAssets(metadata));
 
 if (valid) {
   console.log("✅ Metadata JSON is valid.");
 } else {
-  console.error("❌ Validation failed:", validate.errors);
+  console.error("❌ Validation failed:", errors);
   process.exit(1);
 }

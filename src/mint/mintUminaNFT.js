@@ -26,7 +26,11 @@
  * Before pinning, a real run reads the HCS topic from the mirror node and
  * refuses a stone_id that already has a MINT event, or a topic that does not
  * exist (the mint would have nowhere to be recorded). --force skips the
- * duplicate check, not the topic check. If the run fails after pinning, the
+ * duplicate check, not the topic check. Then a COMPLIANCE event (stone type,
+ * RUC, concession, REINFO, HS code) is posted, and its transaction ID becomes
+ * properties.compliance_proof_hcs in the pinned metadata. The Stone Type,
+ * Materials and Form attributes are written from schema/stone-types.json.
+ * If the run fails after pinning, the
  * CIDs pinned so far are printed so they can be unpinned in Pinata.
  *
  * ## Output
@@ -55,6 +59,7 @@ import {
   validateMintEnv,
 } from "./lib.js";
 import { metadataFromForm, writeGeneratedMetadata } from "./formPost.js";
+import { withStoneTypeAttributes } from "./stoneTypes.js";
 import { parseEcdsaKey } from "../keys.js";
 
 const args = process.argv.slice(2);
@@ -107,7 +112,11 @@ async function main() {
     else missingAssets(assets).forEach((a) => problems.push(`file not found: ${a.file}`));
     // The images have no CIDs yet, so check the schema with placeholder URIs
     const { valid, errors } = validateMetadata(buildMetadata(metadata, images, undefined, documents));
-    if (!valid) problems.push(`${metadataFile} failed validation: ${JSON.stringify(errors)}`);
+    if (!valid) {
+      errors.forEach((e) =>
+        problems.push(`${metadataFile} failed validation: ${e.instancePath || "/"} ${e.message}`),
+      );
+    }
     const idProblem = checkStoneId(metadata.properties?.stone_id);
     if (idProblem) problems.push(idProblem);
     if (problems.length) {
@@ -152,6 +161,42 @@ async function main() {
       parseEcdsaKey(process.env.OPERATOR_KEY),
     );
 
+    // --- 3b. Record the compliance data in HCS before pinning ---
+    // The metadata is immutable once pinned, so compliance_proof_hcs can only
+    // point to a message that already exists: post it first (#14). If this
+    // fails, nothing has been pinned or minted.
+    try {
+      const compliance = buildEvent(
+        {
+          event: "COMPLIANCE",
+          stoneId,
+          tokenId: process.env.UMINA_TOKEN_ID,
+          serials: [],
+          actorId: operatorId,
+        },
+        {
+          stone_type: metadata.properties.stone_type,
+          vendor_ruc: metadata.properties.vendor_ruc,
+          mining_concession: metadata.properties.mining_concession,
+          reinfo_id: metadata.properties.reinfo_id,
+          hs_code: metadata.properties.hs_code,
+        },
+      );
+      const complianceTxId = await submitEvent(
+        client,
+        process.env.HCS_TOPIC_ID,
+        compliance,
+        loadSubmitKey(process.env),
+      );
+      metadata.properties.compliance_proof_hcs = complianceTxId;
+      metadata.properties.hcs_compliance_topic = process.env.HCS_TOPIC_ID;
+      console.log(`✅ COMPLIANCE recorded for ${stoneId}: ${complianceTxId}`);
+    } catch (err) {
+      console.error(`❌ Could not record COMPLIANCE for ${stoneId}; nothing was pinned or minted:`, err);
+      process.exitCode = 1;
+      return;
+    }
+
     // --- 4. Pin the images and documents, then the metadata JSON, then mint ---
     // The same file listed twice is pinned once. If anything fails before the
     // mint succeeds, list what was pinned, since no NFT points to it.
@@ -167,7 +212,8 @@ async function main() {
         pinnedCids.push(fileCid);
         console.log(`✅ Pinned ${path.basename(item.file)}: ipfs://${fileCid}`);
       }
-      const pinned = buildMetadata(metadata, images, cidsByFile, documents);
+      // Stone Type, Materials and Form come from the list, not from the form
+      const pinned = buildMetadata(withStoneTypeAttributes(metadata), images, cidsByFile, documents);
       cid = await pinJson(pinned, stoneId, process.env.PINATA_JWT);
       pinnedCids.push(cid);
       ipfsUri = `ipfs://${cid}`;
