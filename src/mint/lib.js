@@ -7,6 +7,7 @@
 import fs from "fs";
 import path from "path";
 import { parseEcdsaKey } from "../keys.js";
+import { submitKeyProblem } from "../hcs.js";
 
 const HEDERA_ID = /^0\.0\.\d+$/;
 // UMINA-YYYY-XX-NN, for example UMINA-2026-CH-03 (CH = chrysocolla)
@@ -40,6 +41,9 @@ export function validateMintEnv(env) {
   }
 
   if (!env.PINATA_JWT) problems.push("PINATA_JWT is missing");
+
+  const submitProblem = submitKeyProblem(env);
+  if (submitProblem) problems.push(submitProblem);
 
   return problems;
 }

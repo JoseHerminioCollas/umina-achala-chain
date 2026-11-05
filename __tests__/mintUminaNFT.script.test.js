@@ -10,7 +10,7 @@ import { PrivateKey } from "@hashgraph/sdk";
 const key = PrivateKey.generateECDSA().toStringDer();
 const calls = {};
 
-function mockDependencies({ pinStatus = 200, mintError, hcsError } = {}) {
+function mockDependencies({ pinStatus = 200, mintError, hcsError, hcsReceiptError } = {}) {
   calls.order = [];
   calls.mint = null;
   calls.signed = [];
@@ -40,19 +40,30 @@ function mockDependencies({ pinStatus = 200, mintError, hcsError } = {}) {
         execute: jest.fn(async () => {
           calls.order.push("mint");
           if (mintError) throw mintError;
-          return { getReceipt: async () => ({ serials: [7] }) };
+          return {
+            transactionId: { toString: () => "0.0.1001@1700000000.0" },
+            getReceipt: async () => ({ serials: [7] }),
+          };
         }),
       };
       return tx;
     }),
     TopicMessageSubmitTransaction: jest.fn().mockImplementation(() => {
       const tx = {
-        setTopicId: jest.fn((id) => ((calls.hcs = { topicId: id }), tx)),
+        setTopicId: jest.fn((id) => ((calls.hcs = { topicId: id, signed: [] }), tx)),
         setMessage: jest.fn((m) => ((calls.hcs.message = JSON.parse(m)), tx)),
+        freezeWith: jest.fn(() => tx),
+        sign: jest.fn(async (k) => (calls.hcs.signed.push(k.publicKey.toString()), tx)),
         execute: jest.fn(async () => {
           calls.order.push("hcs");
           if (hcsError) throw hcsError;
-          return { transactionId: { toString: () => "0.0.1@1700000000.1" } };
+          return {
+            transactionId: { toString: () => "0.0.1@1700000000.1" },
+            getReceipt: async () => {
+              if (hcsReceiptError) throw hcsReceiptError;
+              return { status: "SUCCESS" };
+            },
+          };
         }),
       };
       return tx;
@@ -201,12 +212,51 @@ describe("mintUminaNFT.js", () => {
     expect(calls.hcs.topicId).toBe("0.0.3003");
     expect(calls.hcs.message).toEqual({
       event: "MINT",
+      schema_version: 1,
       stone_id: "UMINA-2026-CH-03",
-      actor_id: "0.0.1001",
       token_id: "0.0.2002",
       serials: ["7"],
+      actor_id: "0.0.1001",
+      occurred_at: expect.stringMatching(/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/),
+      ref: "0.0.1001@1700000000.0",
       ipfs_cid: "QmMockCID12345",
     });
+    expect(calls.hcs.signed).toEqual([]);
+  });
+
+  test("signs the MINT message with HCS_SUBMIT_KEY when it is set", async () => {
+    const submitKey = PrivateKey.generateECDSA();
+    process.env.HCS_SUBMIT_KEY = submitKey.toStringDer();
+    mockDependencies();
+    await runScript(writeMetadata());
+
+    expect(calls.hcs.signed).toEqual([submitKey.publicKey.toString()]);
+    expect(process.exitCode).not.toBe(1);
+  });
+
+  test("rejects an HCS_SUBMIT_KEY that is not an ECDSA key and sends nothing", async () => {
+    process.env.HCS_SUBMIT_KEY = "not-a-key";
+    mockDependencies();
+    await runScript(writeMetadata());
+
+    expect(console.error).toHaveBeenCalledWith(
+      "   - HCS_SUBMIT_KEY is not an ECDSA private key (hex or DER)",
+    );
+    expect(calls.order).toEqual([]);
+    expect(process.exitCode).toBe(1);
+  });
+
+  test("reports a MINT message rejected at consensus as a failed notarization", async () => {
+    mockDependencies({ hcsReceiptError: new Error("INVALID_SIGNATURE") });
+    await runScript(writeMetadata());
+
+    expect(calls.order).toEqual(["pinFile", "pinFile", "pin", "mint", "hcs"]);
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining("but the HCS notarization failed"),
+      expect.objectContaining({ message: "INVALID_SIGNATURE" }),
+    );
+    expect(console.table).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(1);
   });
 
   test("lists missing variables and sends nothing", async () => {

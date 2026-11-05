@@ -30,11 +30,8 @@
  */
 
 import dotenv from "dotenv";
-import {
-  Client,
-  TokenMintTransaction,
-  TopicMessageSubmitTransaction,
-} from "@hashgraph/sdk";
+import { Client, TokenMintTransaction } from "@hashgraph/sdk";
+import { buildEvent, loadSubmitKey, submitEvent } from "../hcs.js";
 import fs from "fs";
 import { validateMetadata } from "./metadataValidator.js";
 import path from "path";
@@ -151,27 +148,32 @@ async function main() {
     const mintResponse = await mintTx.execute(client);
     const mintReceipt = await mintResponse.getReceipt(client);
     const serials = mintReceipt.serials.map(String);
-    console.log(`✅ Minted Umiña NFT serials: ${serials}`);
+    const mintTxId = mintResponse.transactionId.toString();
+    console.log(`✅ Minted Umiña NFT serials: ${serials} (${mintTxId})`);
 
     // --- 5. Submit Minting message to HCS (Birth Certificate) ---
     // The NFT exists now, so if this fails say so and keep what is needed to
-    // notarize it by hand.
+    // notarize it by hand. submitEvent waits for the receipt, so a message
+    // rejected at consensus lands here too.
     let hcsTxId;
     try {
-      const hcsResponse = await new TopicMessageSubmitTransaction()
-        .setTopicId(process.env.HCS_TOPIC_ID)
-        .setMessage(
-          JSON.stringify({
-            event: "MINT",
-            stone_id: stoneId,
-            actor_id: operatorId,
-            token_id: process.env.UMINA_TOKEN_ID,
-            serials,
-            ipfs_cid: cid,
-          }),
-        )
-        .execute(client);
-      hcsTxId = hcsResponse.transactionId.toString();
+      const message = buildEvent(
+        {
+          event: "MINT",
+          stoneId,
+          tokenId: process.env.UMINA_TOKEN_ID,
+          serials,
+          actorId: operatorId,
+          ref: mintTxId,
+        },
+        { ipfs_cid: cid },
+      );
+      hcsTxId = await submitEvent(
+        client,
+        process.env.HCS_TOPIC_ID,
+        message,
+        loadSubmitKey(process.env),
+      );
     } catch (err) {
       console.error(
         `❌ Minted serials ${serials} (${ipfsUri}) but the HCS notarization failed:`,

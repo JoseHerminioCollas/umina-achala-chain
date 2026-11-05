@@ -23,11 +23,11 @@ import {
   NftId,
   TokenId,
   TokenNftInfoQuery,
-  TopicMessageSubmitTransaction,
   TransactionId,
   TransferTransaction,
 } from "@hashgraph/sdk";
 import { consignmentProblems, consignmentSplit } from "./lib.js";
+import { buildEvent, loadSubmitKey, submitEvent, submitKeyProblem } from "../hcs.js";
 import { parseEcdsaKey } from "../keys.js";
 
 const args = process.argv.slice(2);
@@ -53,6 +53,8 @@ async function main() {
     // --- 1. Check the arguments and environment ---
     const problems = consignmentProblems(process.env, REQUIRED, serial);
     if (!(Number(price) > 0)) problems.push("give the price in HBAR as a positive number");
+    const submitProblem = submitKeyProblem(process.env);
+    if (submitProblem) problems.push(submitProblem);
     if (problems.length) {
       console.error("❌ Problems found:");
       problems.forEach((p) => console.error(`   - ${p}`));
@@ -118,27 +120,36 @@ async function main() {
 
     // --- 5. Notarize the sale in HCS ---
     // The sale has settled, so if this fails say so and keep what is needed
-    // to notarize it by hand.
+    // to notarize it by hand. submitEvent waits for the receipt, so a message
+    // rejected at consensus lands here too. SALE fields follow the event
+    // catalog in umina-achala-chain#10; the split is kept in tinybars.
     let hcsTxId;
     try {
-      const hcsResponse = await new TopicMessageSubmitTransaction()
-        .setTopicId(process.env.HCS_TOPIC_ID)
-        .setMessage(
-          JSON.stringify({
-            event: "SALE",
-            actor_id: uaId.toString(),
-            token_id: tokenId.toString(),
-            serial,
-            merchant_id: merchantId.toString(),
-            buyer_id: buyerId.toString(),
-            price_tinybars: priceTinybars.toString(),
-            merchant_tinybars: split.merchant.toString(),
-            ua_tinybars: split.ua.toString(),
-            sale_tx_id: saleTxId,
-          }),
-        )
-        .execute(client);
-      hcsTxId = hcsResponse.transactionId.toString();
+      const message = buildEvent(
+        {
+          event: "SALE",
+          tokenId,
+          serials: [serial],
+          actorId: uaId,
+          ref: saleTxId,
+        },
+        {
+          seller_id: merchantId.toString(),
+          buyer_id: buyerId.toString(),
+          payment: "on_chain",
+          sold_for: tinybars(priceTinybars).toBigNumber().toString(),
+          currency: "HBAR",
+          price_tinybars: priceTinybars.toString(),
+          merchant_tinybars: split.merchant.toString(),
+          ua_tinybars: split.ua.toString(),
+        },
+      );
+      hcsTxId = await submitEvent(
+        client,
+        process.env.HCS_TOPIC_ID,
+        message,
+        loadSubmitKey(process.env),
+      );
     } catch (err) {
       console.error(`❌ Sale ${saleTxId} settled but the HCS notarization failed:`, err);
       process.exitCode = 1;

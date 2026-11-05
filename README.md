@@ -11,7 +11,7 @@ Hedera scripts for Umiña Achala: create the HTS token, validate HIP-412 metadat
 | `src/token/` | `createUminaToken.js` | `lib.js` |
 | `src/mint/` | `mintUminaNFT.js`, `validateMetadata.js` | `lib.js`, `formPost.js`, `metadataValidator.js` |
 | `src/consignment/` | `associateToken.js`, `consignToMerchant.js`, `sellConsigned.js` | `lib.js` |
-| `src/` | | `keys.js` (ECDSA key parsing used by every script) |
+| `src/` | | `keys.js` (ECDSA key parsing used by every script), `hcs.js` (builds HCS events with the envelope from umina-achala-chain#10, signs them with the optional `HCS_SUBMIT_KEY`, and waits for the receipt) |
 
 ## Scripts
 
