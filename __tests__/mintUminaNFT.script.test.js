@@ -132,24 +132,36 @@ function mockDependencies({
   });
 }
 
+// Image versions go to a temp folder unless a test gives its own --out
+let outDir;
+
 async function runScript(...args) {
-  process.argv = ["node", "src/mint/mintUminaNFT.js", ...args];
-  await import("../src/mint/mintUminaNFT.js");
-  // main() is not awaited by the module, so let its promises settle
-  await new Promise((resolve) => setImmediate(resolve));
+  const out = args.includes("--out") ? [] : ["--out", outDir];
+  process.argv = ["node", "src/mint/mintUminaNFT.js", ...args, ...out];
+  const { done } = await import("../src/mint/mintUminaNFT.js");
+  await done;
 }
 
 // Writes a metadata file (the example template plus a list of images) and the
 // image files it names into a temp folder, and returns the metadata file path.
-function writeMetadata(change = () => {}, imageNames = ["thumb.jpg", "master.jpg"], documentNames = []) {
+// A real 1600×1200 JPEG (made once in beforeAll), so sharp can read the photos
+let photo;
+
+// The first image name becomes main_image and the rest go in images.
+function writeMetadata(change = () => {}, imageNames = ["front.jpg", "back.jpg"], documentNames = []) {
   const metadata = JSON.parse(fs.readFileSync("json/example.json", "utf8"));
-  metadata.images = imageNames.map((name) => ({ file: name, description: `${name} description` }));
-  if (documentNames.length) {
-    metadata.documents = documentNames.map((name) => ({ file: name, description: `${name} description` }));
-  }
+  // The example names its own photos in samples/; each test names its own
+  delete metadata.main_image;
+  delete metadata.images;
+  const entry = (name) => ({ file: name, description: `${name} description` });
+  const [main, ...others] = imageNames;
+  if (main) metadata.main_image = entry(main);
+  if (others.length) metadata.images = others.map(entry);
+  if (documentNames.length) metadata.documents = documentNames.map(entry);
   change(metadata);
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "umina-"));
-  [...new Set([...imageNames, ...documentNames])].forEach((name) => fs.writeFileSync(path.join(dir, name), "data"));
+  new Set(imageNames).forEach((name) => fs.writeFileSync(path.join(dir, name), photo));
+  new Set(documentNames).forEach((name) => fs.writeFileSync(path.join(dir, name), "data"));
   const file = path.join(dir, "metadata.json");
   fs.writeFileSync(file, JSON.stringify(metadata));
   return file;
@@ -159,6 +171,19 @@ describe("mintUminaNFT.js", () => {
   const env = { ...process.env };
   const argv = [...process.argv];
   const fetchBefore = global.fetch;
+
+  beforeAll(async () => {
+    const sharp = (await import("sharp")).default;
+    photo = await sharp({
+      create: { width: 1600, height: 1200, channels: 3, background: { r: 40, g: 120, b: 160 } },
+    })
+      .jpeg()
+      .toBuffer();
+  });
+
+  beforeEach(() => {
+    outDir = fs.mkdtempSync(path.join(os.tmpdir(), "umina-out-"));
+  });
   let log;
 
   beforeEach(() => {
@@ -189,7 +214,7 @@ describe("mintUminaNFT.js", () => {
     mockDependencies();
     await runScript(writeMetadata());
 
-    expect(calls.order).toEqual(["compliance", "pinFile", "pinFile", "pin", "mint", "hcs"]);
+    expect(calls.order).toEqual(["compliance", "pinFile", "pinFile", "pinFile", "pin", "mint", "hcs"]);
     expect(process.exitCode).toBeUndefined();
     expect(calls.close).toHaveBeenCalled();
   });
@@ -198,35 +223,55 @@ describe("mintUminaNFT.js", () => {
     mockDependencies();
     await runScript(writeMetadata());
 
+    // The main photo's master and display version, then the other photo's master
     expect(calls.files).toEqual([
-      { name: "thumb.jpg", type: "image/jpeg", metadataName: "UMINA-2026-CH-03-thumb.jpg" },
-      { name: "master.jpg", type: "image/jpeg", metadataName: "UMINA-2026-CH-03-master.jpg" },
+      { name: "01-master.jpg", type: "image/jpeg", metadataName: "UMINA-2026-CH-03-01-master.jpg" },
+      { name: "01-display.jpg", type: "image/jpeg", metadataName: "UMINA-2026-CH-03-01-display.jpg" },
+      { name: "02-master.jpg", type: "image/jpeg", metadataName: "UMINA-2026-CH-03-02-master.jpg" },
     ]);
     expect(calls.pin.headers.authorization).toBe("Bearer test-jwt");
   });
 
-  test("sets image and files from the pinned CIDs and drops the images list", async () => {
+  test("image is the display version; files has each master with its checksum, the main one default", async () => {
     mockDependencies();
     await runScript(writeMetadata());
 
     const pinned = calls.pin.body.pinataContent;
+    expect(pinned.main_image).toBeUndefined();
     expect(pinned.images).toBeUndefined();
-    expect(pinned.image).toBe("ipfs://QmFile1");
+    expect(pinned.image).toBe("ipfs://QmFile2");
     expect(pinned.type).toBe("image/jpeg");
+    const checksum = expect.stringMatching(/^[0-9a-f]{64}$/);
     expect(pinned.files).toEqual([
-      { uri: "ipfs://QmFile1", type: "image/jpeg", is_default_file: true, metadata: { description: "thumb.jpg description" } },
-      { uri: "ipfs://QmFile2", type: "image/jpeg", is_default_file: false, metadata: { description: "master.jpg description" } },
+      { uri: "ipfs://QmFile1", type: "image/jpeg", is_default_file: true, checksum, metadata: { description: "front.jpg description" } },
+      { uri: "ipfs://QmFile3", type: "image/jpeg", is_default_file: false, checksum, metadata: { description: "back.jpg description" } },
     ]);
     expect(calls.pin.body.pinataMetadata.name).toBe("UMINA-2026-CH-03");
   });
 
-  test("pins an image listed twice only once", async () => {
+  test("writes the versions to <out>/<stone_id>/: the display version 1080 px, the masters full size", async () => {
     mockDependencies();
-    await runScript(writeMetadata(() => {}, ["thumb.jpg", "thumb.jpg"]));
+    await runScript(writeMetadata());
 
-    expect(calls.files).toHaveLength(1);
-    const pinned = calls.pin.body.pinataContent;
-    expect(pinned.files.map((f) => f.uri)).toEqual(["ipfs://QmFile1", "ipfs://QmFile1"]);
+    const sharp = (await import("sharp")).default;
+    const dir = path.join(outDir, "UMINA-2026-CH-03");
+    const size = async (f) => {
+      const m = await sharp(path.join(dir, f)).metadata();
+      return [m.width, m.height];
+    };
+    expect(fs.readdirSync(dir).sort()).toEqual(["01-display.jpg", "01-master.jpg", "02-master.jpg"]);
+    expect(await size("01-display.jpg")).toEqual([1080, 810]);
+    expect(await size("01-master.jpg")).toEqual([1600, 1200]);
+  });
+
+  test("refuses a photo listed twice", async () => {
+    mockDependencies();
+    await runScript(writeMetadata(() => {}, ["front.jpg", "front.jpg"]));
+
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringMatching(/images\[0\]\.file "front\.jpg" is already main_image/),
+    );
+    expect(calls.order).toEqual([]);
   });
 
   test("mints under UMINA_TOKEN_ID with the ipfs:// URI, signed by the supply key", async () => {
@@ -286,7 +331,7 @@ describe("mintUminaNFT.js", () => {
     mockDependencies({ hcsReceiptError: new Error("INVALID_SIGNATURE") });
     await runScript(writeMetadata());
 
-    expect(calls.order).toEqual(["compliance", "pinFile", "pinFile", "pin", "mint", "hcs"]);
+    expect(calls.order).toEqual(["compliance", "pinFile", "pinFile", "pinFile", "pin", "mint", "hcs"]);
     expect(console.error).toHaveBeenCalledWith(
       expect.stringContaining("but the HCS notarization failed"),
       expect.objectContaining({ message: "INVALID_SIGNATURE" }),
@@ -408,18 +453,53 @@ describe("mintUminaNFT.js", () => {
     expect(process.exitCode).toBe(1);
   });
 
-  test("rejects metadata with no images", async () => {
+  test("requires main_image", async () => {
     mockDependencies();
-    await runScript(writeMetadata((m) => (m.images = []), []));
+    await runScript(writeMetadata(() => {}, []));
 
-    expect(console.error).toHaveBeenCalledWith("   - images must list at least one image file");
+    expect(console.error).toHaveBeenCalledWith(
+      "   - main_image is required: the photo whose display version becomes `image`",
+    );
     expect(calls.order).toEqual([]);
     expect(process.exitCode).toBe(1);
+  });
+
+  test("refuses more than 5 photos besides main_image", async () => {
+    mockDependencies();
+    await runScript(writeMetadata(() => {}, ["a.jpg", "b.jpg", "c.jpg", "d.jpg", "e.jpg", "f.jpg", "g.jpg"]));
+
+    expect(console.error).toHaveBeenCalledWith("   - images lists 6 photos; at most 5 besides main_image");
+    expect(calls.order).toEqual([]);
+  });
+
+  test.each([
+    ["GIF", "photo.gif", /GIF has 256 colours/],
+    ["HEIC", "IMG_0001.HEIC", /HEIC \(an iPhone photo\) is not supported; export or share it as JPEG/],
+    ["a RAW file", "photo.dng", /is not a JPEG, PNG or WebP photo/],
+  ])("refuses %s by its extension", async (_, name, message) => {
+    mockDependencies();
+    await runScript(writeMetadata(() => {}, [name]));
+
+    expect(console.error).toHaveBeenCalledWith(expect.stringMatching(message));
+    expect(calls.order).toEqual([]);
+  });
+
+  test("refuses a file that is not really an image, whatever its extension", async () => {
+    mockDependencies();
+    const file = writeMetadata();
+    fs.writeFileSync(path.join(path.dirname(file), "front.jpg"), "not a photo");
+    await runScript(file);
+
+    expect(console.error).toHaveBeenCalledWith(
+      "   - main_image is not an image sharp can read (JPEG, PNG or WebP)",
+    );
+    expect(calls.order).toEqual([]);
   });
 
   test("lists an image file that does not exist and sends nothing", async () => {
     mockDependencies();
     const file = writeMetadata((m) => m.images.push({ file: "gone.jpg" }));
+    // (back.jpg exists; gone.jpg does not)
     await runScript(file);
 
     expect(console.error).toHaveBeenCalledWith(expect.stringContaining("file not found:"));
@@ -427,15 +507,52 @@ describe("mintUminaNFT.js", () => {
     expect(process.exitCode).toBe(1);
   });
 
-  test("--dry-run lists the images it would pin and sends nothing", async () => {
+  test("--dry-run lists the versions it would make, writes none, sends nothing", async () => {
     mockDependencies();
     await runScript(writeMetadata(), "--dry-run");
 
-    expect(log).toHaveBeenCalledWith(expect.stringContaining("Would pin"));
+    const dir = path.join(outDir, "UMINA-2026-CH-03");
+    expect(log).toHaveBeenCalledWith(`Would make ${dir}/01-master.jpg (image/jpeg, 1600×1200)`);
+    expect(log).toHaveBeenCalledWith(`Would make ${dir}/01-display.jpg (image/jpeg, 1080×810)`);
+    expect(log).toHaveBeenCalledWith(`Would make ${dir}/02-master.jpg (image/jpeg, 1600×1200)`);
     expect(log).toHaveBeenCalledWith("Dry run, nothing sent.");
+    expect(fs.existsSync(dir)).toBe(false);
     expect(calls.order).toEqual([]);
     expect(calls.forTestnet).not.toHaveBeenCalled();
     expect(process.exitCode).toBeUndefined();
+  });
+
+  test("--images-only writes the versions and prints the metadata, without credentials or network", async () => {
+    delete process.env.PINATA_JWT;
+    delete process.env.SUPPLY_KEY;
+    delete process.env.UMINA_TOKEN_ID;
+    mockDependencies();
+    await runScript(writeMetadata(), "--images-only");
+
+    const dir = path.join(outDir, "UMINA-2026-CH-03");
+    expect(fs.readdirSync(dir).sort()).toEqual(["01-display.jpg", "01-master.jpg", "02-master.jpg"]);
+    expect(log).toHaveBeenCalledWith(`Would pin ${dir}/01-display.jpg (image/jpeg)`);
+    expect(log).toHaveBeenCalledWith(
+      "Would record COMPLIANCE, mint under not set and record MINT in 0.0.3003.",
+    );
+    expect(log).toHaveBeenCalledWith("Images only: nothing pinned, minted or recorded.");
+    const printed = log.mock.calls.map(([line]) => line).find((line) => String(line).startsWith("{"));
+    expect(JSON.parse(printed).files[0]).toMatchObject({
+      is_default_file: true,
+      checksum: expect.stringMatching(/^[0-9a-f]{64}$/),
+    });
+    expect(calls.order).toEqual([]);
+    expect(calls.mirror).toEqual([]);
+    expect(calls.forTestnet).not.toHaveBeenCalled();
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  test("refuses --dry-run and --images-only together", async () => {
+    mockDependencies();
+    await runScript(writeMetadata(), "--dry-run", "--images-only");
+
+    expect(console.error).toHaveBeenCalledWith("❌ Give --dry-run or --images-only, not both.");
+    expect(process.exitCode).toBe(1);
   });
 
   test("does not pin the metadata or mint when an image pin fails", async () => {
@@ -451,7 +568,7 @@ describe("mintUminaNFT.js", () => {
     mockDependencies({ mintError: new Error("TOKEN_HAS_NO_SUPPLY_KEY") });
     await runScript(writeMetadata());
 
-    expect(calls.order).toEqual(["compliance", "pinFile", "pinFile", "pin", "mint"]);
+    expect(calls.order).toEqual(["compliance", "pinFile", "pinFile", "pinFile", "pin", "mint"]);
     expect(process.exitCode).toBe(1);
     expect(calls.close).toHaveBeenCalled();
   });
@@ -461,7 +578,7 @@ describe("mintUminaNFT.js", () => {
     await runScript(writeMetadata());
 
     expect(console.error).toHaveBeenCalledWith(
-      "   These pins are not used by any NFT; unpin them in Pinata: ipfs://QmFile1, ipfs://QmFile2, ipfs://QmMockCID12345",
+      "   These pins are not used by any NFT; unpin them in Pinata: ipfs://QmFile1, ipfs://QmFile2, ipfs://QmFile3, ipfs://QmMockCID12345",
     );
   });
 
@@ -515,7 +632,7 @@ describe("mintUminaNFT.js", () => {
     });
     await runScript(writeMetadata());
 
-    expect(calls.order).toEqual(["compliance", "pinFile", "pinFile", "pin", "mint", "hcs"]);
+    expect(calls.order).toEqual(["compliance", "pinFile", "pinFile", "pinFile", "pin", "mint", "hcs"]);
   });
 
   test("--force mints a stone_id that already has a MINT event", async () => {
@@ -524,7 +641,7 @@ describe("mintUminaNFT.js", () => {
     });
     await runScript(writeMetadata(), "--force");
 
-    expect(calls.order).toEqual(["compliance", "pinFile", "pinFile", "pin", "mint", "hcs"]);
+    expect(calls.order).toEqual(["compliance", "pinFile", "pinFile", "pinFile", "pin", "mint", "hcs"]);
     expect(process.exitCode).toBeUndefined();
   });
 
@@ -550,7 +667,7 @@ describe("mintUminaNFT.js", () => {
     mockDependencies({ hcsError: new Error("TOPIC_EXPIRED") });
     await runScript(writeMetadata());
 
-    expect(calls.order).toEqual(["compliance", "pinFile", "pinFile", "pin", "mint", "hcs"]);
+    expect(calls.order).toEqual(["compliance", "pinFile", "pinFile", "pinFile", "pin", "mint", "hcs"]);
     expect(console.error).toHaveBeenCalledWith(
       expect.stringContaining("Minted serials 7 (ipfs://QmMockCID12345)"),
       expect.any(Error),
@@ -561,21 +678,28 @@ describe("mintUminaNFT.js", () => {
 
   test("pins documents after the images and lists them after the images in files", async () => {
     mockDependencies();
-    await runScript(writeMetadata(() => {}, ["thumb.jpg"], ["receipt.pdf", "permit.pdf"]));
+    await runScript(writeMetadata(() => {}, ["front.jpg"], ["receipt.pdf", "permit.pdf"]));
 
-    expect(calls.order).toEqual(["compliance", "pinFile", "pinFile", "pinFile", "pin", "mint", "hcs"]);
+    expect(calls.order).toEqual(["compliance", "pinFile", "pinFile", "pinFile", "pinFile", "pin", "mint", "hcs"]);
     expect(calls.files.map((f) => [f.name, f.type])).toEqual([
-      ["thumb.jpg", "image/jpeg"],
+      ["01-master.jpg", "image/jpeg"],
+      ["01-display.jpg", "image/jpeg"],
       ["receipt.pdf", "application/pdf"],
       ["permit.pdf", "application/pdf"],
     ]);
     const pinned = calls.pin.body.pinataContent;
     expect(pinned.documents).toBeUndefined();
-    expect(pinned.image).toBe("ipfs://QmFile1");
+    expect(pinned.image).toBe("ipfs://QmFile2");
     expect(pinned.files).toEqual([
-      { uri: "ipfs://QmFile1", type: "image/jpeg", is_default_file: true, metadata: { description: "thumb.jpg description" } },
-      { uri: "ipfs://QmFile2", type: "application/pdf", metadata: { description: "receipt.pdf description" } },
-      { uri: "ipfs://QmFile3", type: "application/pdf", metadata: { description: "permit.pdf description" } },
+      {
+        uri: "ipfs://QmFile1",
+        type: "image/jpeg",
+        is_default_file: true,
+        checksum: expect.stringMatching(/^[0-9a-f]{64}$/),
+        metadata: { description: "front.jpg description" },
+      },
+      { uri: "ipfs://QmFile3", type: "application/pdf", metadata: { description: "receipt.pdf description" } },
+      { uri: "ipfs://QmFile4", type: "application/pdf", metadata: { description: "permit.pdf description" } },
     ]);
   });
 
@@ -611,7 +735,8 @@ describe("mintUminaNFT.js", () => {
   // Writes a simulated form post and the files it uploads into a temp folder
   function writeFormPost(change = () => {}) {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "umina-form-"));
-    ["thumb.jpg", "receipt.pdf"].forEach((n) => fs.writeFileSync(path.join(dir, n), "data"));
+    fs.writeFileSync(path.join(dir, "front.jpg"), photo);
+    fs.writeFileSync(path.join(dir, "receipt.pdf"), "data");
     const post = {
       name: "Stone from the form",
       description: "Posted through the mint form",
@@ -626,7 +751,7 @@ describe("mintUminaNFT.js", () => {
       reinfo_id: "10456789124",
       // A hand-written Stone Type is replaced by the one from the list
       attributes: { "Stone Type": "chrysocola (typo)" },
-      images: [{ file: "thumb.jpg", description: "Front view" }],
+      main_image: { file: "front.jpg", description: "Front view" },
       documents: [{ file: "receipt.pdf", description: "Store receipt" }],
     };
     change(post);
@@ -642,9 +767,9 @@ describe("mintUminaNFT.js", () => {
 
     const generated = JSON.parse(fs.readFileSync(path.join(outDir, "UMINA-2026-CH-77.json"), "utf8"));
     expect(generated.properties.stone_id).toBe("UMINA-2026-CH-77");
-    expect(generated.images[0].file).toBe(path.join(path.dirname(file), "thumb.jpg"));
+    expect(generated.main_image.file).toBe(path.join(path.dirname(file), "front.jpg"));
 
-    expect(calls.order).toEqual(["compliance", "pinFile", "pinFile", "pin", "mint", "hcs"]);
+    expect(calls.order).toEqual(["compliance", "pinFile", "pinFile", "pinFile", "pin", "mint", "hcs"]);
     const pinned = calls.pin.body.pinataContent;
     expect(pinned.name).toBe("Stone from the form");
     expect(pinned.attributes).toEqual([

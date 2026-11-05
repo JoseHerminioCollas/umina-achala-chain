@@ -6,15 +6,24 @@
  * mint, notarize, so the ledger never holds a MINT record for an NFT that does
  * not exist).
  *
- * The metadata file has no `image` or `files` of its own. Instead it lists the
- * item's pictures in an input-only `images` array, and optionally its receipts
- * and permits in a `documents` array. Each entry has a `file` (a path relative
- * to the metadata file) and a `description`. The files are pinned first; then
- * `image` (the first picture) and one `files[]` entry per file are set from
- * their CIDs, the two lists are dropped, and the result is pinned.
+ * The metadata file has no `image` or `files` of its own. Instead it names the
+ * item's photos in input-only fields, `main_image` (required) and `images`
+ * (up to 5 more), and optionally its receipts and permits in `documents`. Each
+ * entry has a `file` (a path relative to the metadata file) and a
+ * `description`. Each photo is checked (JPEG, PNG or WebP by its real type, up
+ * to 25 MB and about 100 megapixels) and re-encoded without EXIF into
+ * generated/<stone_id>/ (#7): a master for every photo, and a 1080 px display
+ * version of the main photo. Those files are pinned first; then `image` (the
+ * display version) and one `files[]` entry per master (the main one is the
+ * default file, each with its SHA-256 checksum) and per document are set from
+ * their CIDs, the input fields are dropped, and the result is pinned.
+ *
+ * --images-only makes the image files and prints what would be pinned
+ * (including the metadata) and minted, without pinning, minting or needing
+ * any credentials. --dry-run only lists the files it would make.
  *
  * Run from the command line:
- * node src/mint/mintUminaNFT.js [metadata-file | --form post-file] [--out dir] [--force] [--dry-run]
+ * node src/mint/mintUminaNFT.js [metadata-file | --form post-file] [--out dir] [--force] [--dry-run | --images-only]
  *
  * With --form the input is a simulated mint form post (see formPost.js). The
  * metadata file is generated from it into --out (default generated/) and then
@@ -44,6 +53,7 @@ import { Client, TokenMintTransaction } from "@hashgraph/sdk";
 import { buildEvent, loadSubmitKey, submitEvent } from "../hcs.js";
 import fs from "fs";
 import { validateMetadata } from "./metadataValidator.js";
+import { inspectImage, planVersions, writeVersions } from "./images.js";
 import path from "path";
 import { topicEvents } from "../mirror.js";
 import {
@@ -64,6 +74,7 @@ import { parseEcdsaKey } from "../keys.js";
 
 const args = process.argv.slice(2);
 const dryRun = args.includes("--dry-run");
+const imagesOnly = args.includes("--images-only");
 const force = args.includes("--force");
 const option = (name) => {
   const i = args.indexOf(name);
@@ -84,14 +95,20 @@ async function main() {
     if (!formFile && !metadataFile) {
       console.error(
         "❌ Give a form post or a metadata file:\n" +
-          "   node src/mint/mintUminaNFT.js --form json/sample-form-post.json [--out dir] [--dry-run]\n" +
-          "   node src/mint/mintUminaNFT.js <metadata-file> [--dry-run]",
+          "   node src/mint/mintUminaNFT.js --form json/sample-form-post.json [--out dir] [--force] [--dry-run | --images-only]\n" +
+          "   node src/mint/mintUminaNFT.js <metadata-file> [--out dir] [--force] [--dry-run | --images-only]",
       );
       process.exitCode = 1;
       return;
     }
+    if (dryRun && imagesOnly) {
+      console.error("❌ Give --dry-run or --images-only, not both.");
+      process.exitCode = 1;
+      return;
+    }
     // --- 1. Check the environment and the metadata ---
-    const problems = validateMintEnv(process.env);
+    // --images-only never leaves the machine, so it needs no credentials
+    const problems = imagesOnly ? [] : validateMintEnv(process.env);
     if (formFile) {
       // Simulated form post: generate the metadata file from it first
       const form = JSON.parse(fs.readFileSync(formFile, "utf8"));
@@ -106,19 +123,32 @@ async function main() {
     problems.push(...imageProblems);
     const { documents, problems: documentProblems } = collectDocuments(metadata, baseDir);
     problems.push(...documentProblems);
-    const assets = [...images, ...documents];
-    const samplesProblem = samplesFolderProblem(assets, path.resolve("samples"));
+    const uploads = [...images, ...documents];
+    const samplesProblem = samplesFolderProblem(uploads, path.resolve("samples"));
     if (samplesProblem) problems.push(samplesProblem);
-    else missingAssets(assets).forEach((a) => problems.push(`file not found: ${a.file}`));
-    // The images have no CIDs yet, so check the schema with placeholder URIs
-    const { valid, errors } = validateMetadata(buildMetadata(metadata, images, undefined, documents));
-    if (!valid) {
-      errors.forEach((e) =>
-        problems.push(`${metadataFile} failed validation: ${e.instancePath || "/"} ${e.message}`),
-      );
-    }
+    else missingAssets(uploads).forEach((a) => problems.push(`file not found: ${a.file}`));
     const idProblem = checkStoneId(metadata.properties?.stone_id);
     if (idProblem) problems.push(idProblem);
+
+    // Check each photo from its header (type, size, pixels) and plan its
+    // versions in generated/<stone_id>/ (#7); nothing is written yet
+    if (!problems.length) {
+      const stoneDir = path.join(outDir, metadata.properties.stone_id);
+      for (const image of images) {
+        const info = await inspectImage(image.file, image.label);
+        if (info.problem) problems.push(info.problem);
+        else Object.assign(image, { info, versions: planVersions(image, info, stoneDir) });
+      }
+    }
+    if (!problems.length) {
+      // The files have no CIDs yet, so check the schema with placeholder URIs
+      const { valid, errors } = validateMetadata(buildMetadata(metadata, images, undefined, documents));
+      if (!valid) {
+        errors.forEach((e) =>
+          problems.push(`${metadataFile} failed validation: ${e.instancePath || "/"} ${e.message}`),
+        );
+      }
+    }
     if (problems.length) {
       console.error("❌ Problems found:");
       problems.forEach((p) => console.error(`   - ${p}`));
@@ -126,11 +156,38 @@ async function main() {
       return;
     }
     const stoneId = metadata.properties.stone_id;
-    console.log(`✅ Environment and metadata for ${stoneId} are valid.`);
+    console.log(`✅ ${imagesOnly ? "Metadata" : "Environment and metadata"} for ${stoneId} are valid.`);
 
+    const describeVersion = (v) => `${v.file} (${v.mime}, ${v.width}×${v.height})`;
     if (dryRun) {
-      assets.forEach((a) => console.log(`Would pin ${a.file} (${a.mime})`));
+      for (const image of images) {
+        Object.values(image.versions).forEach((v) => console.log(`Would make ${describeVersion(v)}`));
+      }
+      documents.forEach((d) => console.log(`Would pin ${d.file} (${d.mime})`));
       console.log("Dry run, nothing sent.");
+      return;
+    }
+
+    // --- 1b. Make the image versions (master for every photo, display for the main one) ---
+    for (const image of images) {
+      image.versions = await writeVersions(image.file, image.info, image.versions);
+      Object.values(image.versions).forEach((v) => console.log(`✅ Made ${describeVersion(v)}`));
+    }
+    const assets = [
+      ...images.flatMap((image) => Object.values(image.versions)),
+      ...documents,
+    ];
+
+    if (imagesOnly) {
+      assets.forEach((a) => console.log(`Would pin ${a.file} (${a.mime})`));
+      const preview = buildMetadata(withStoneTypeAttributes(metadata), images, undefined, documents);
+      console.log("Would pin this metadata (CIDs pending):");
+      console.log(JSON.stringify(preview, null, 2));
+      const show = (name) => process.env[name] || "not set";
+      console.log(
+        `Would record COMPLIANCE, mint under ${show("UMINA_TOKEN_ID")} and record MINT in ${show("HCS_TOPIC_ID")}.`,
+      );
+      console.log("Images only: nothing pinned, minted or recorded.");
       return;
     }
 
@@ -292,4 +349,5 @@ async function main() {
   }
 }
 
-main();
+// Exported so tests can wait for the run to finish (image work is real async work)
+export const done = main();

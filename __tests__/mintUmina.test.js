@@ -113,123 +113,97 @@ describe("pinJson", () => {
 
 describe("images", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "umina-assets-"));
-  fs.writeFileSync(path.join(dir, "thumb.jpg"), "jpg");
   const make = () => ({
     name: "Stone",
-    images: [
-      { file: "thumb.jpg", description: "Front view" },
-      { file: "docs/side.PNG", description: "Side view" },
-    ],
+    main_image: { file: "front.jpg", description: "Front view" },
+    images: [{ file: "docs/side.PNG", description: "Side view" }],
   });
 
-  test("collectImages resolves paths against the base dir and sets MIME types", () => {
+  test("collectImages reads main_image first, then images, with absolute paths", () => {
     const { images, problems } = collectImages(make(), dir);
     expect(problems).toEqual([]);
     expect(images).toEqual([
-      { file: path.join(dir, "thumb.jpg"), description: "Front view", mime: "image/jpeg" },
-      { file: path.join(dir, "docs/side.PNG"), description: "Side view", mime: "image/png" },
+      { file: path.join(dir, "front.jpg"), description: "Front view", label: "main_image", main: true, index: 1 },
+      { file: path.join(dir, "docs/side.PNG"), description: "Side view", label: "images[0]", main: false, index: 2 },
     ]);
   });
 
-  test("collectImages needs at least one image", () => {
-    expect(collectImages({}, dir).problems).toEqual(["images must list at least one image file"]);
-    expect(collectImages({ images: [] }, dir).problems).toHaveLength(1);
-  });
-
-  test("collectImages names an entry with no file or an unsupported type", () => {
-    const { problems } = collectImages({ images: [{ description: "x" }, { file: "a.pdf" }] }, dir);
-    expect(problems).toEqual([
-      "images[0].file is missing",
-      'images[1].file "a.pdf" is not a supported image type',
+  test("collectImages needs main_image; images is optional", () => {
+    expect(collectImages({}, dir).problems).toEqual([
+      "main_image is required: the photo whose display version becomes `image`",
     ]);
+    expect(collectImages({ main_image: { file: "a.webp" } }, dir).problems).toEqual([]);
   });
 
-  test("missingAssets reports files that do not exist", () => {
-    const { images } = collectImages(make(), dir);
-    expect(missingAssets(images).map((a) => a.file)).toEqual([path.join(dir, "docs/side.PNG")]);
-  });
-
-  test("samplesFolderProblem fails when images point into a samples folder that does not exist", () => {
-    const { images } = collectImages({ images: [{ file: "../samples/thumb.jpg" }] }, path.join(dir, "json"));
-    const samples = path.join(dir, "samples");
-
-    expect(samplesFolderProblem(images, samples)).toMatch(/samples is missing/);
-    fs.mkdirSync(samples);
-    expect(samplesFolderProblem(images, samples)).toBeNull();
-  });
-
-  test("samplesFolderProblem ignores the folder when no image is inside it", () => {
-    const { images } = collectImages(make(), dir);
-    expect(samplesFolderProblem(images, path.join(dir, "no-such-samples"))).toBeNull();
-  });
-
-  test("buildMetadata sets image, type and one files entry per image from the CIDs", () => {
-    const metadata = make();
-    const { images } = collectImages(metadata, dir);
-    const cids = new Map([[images[0].file, "QmThumb"], [images[1].file, "QmSide"]]);
-    const built = buildMetadata(metadata, images, cids);
-
-    expect(built.images).toBeUndefined();
-    expect(built.image).toBe("ipfs://QmThumb");
-    expect(built.type).toBe("image/jpeg");
-    expect(built.files).toEqual([
-      { uri: "ipfs://QmThumb", type: "image/jpeg", is_default_file: true, metadata: { description: "Front view" } },
-      { uri: "ipfs://QmSide", type: "image/png", is_default_file: false, metadata: { description: "Side view" } },
-    ]);
-    // the input is left as it was
-    expect(metadata.images).toHaveLength(2);
-  });
-
-  test("buildMetadata uses placeholder URIs until the CIDs exist", () => {
-    const { images } = collectImages(make(), dir);
-    const built = buildMetadata(make(), images);
-    expect(built.image).toBe("ipfs://pending");
-    expect(built.files.map((f) => f.uri)).toEqual(["ipfs://pending", "ipfs://pending"]);
-  });
-
-  test("buildMetadata keeps files already in the metadata and an existing image", () => {
-    const metadata = { ...make(), image: "ipfs://QmOwn", files: [{ uri: "ipfs://QmDoc", type: "application/pdf" }] };
-    const { images } = collectImages(metadata, dir);
-    const built = buildMetadata(metadata, images);
-    expect(built.image).toBe("ipfs://QmOwn");
-    expect(built.files[0]).toEqual({ uri: "ipfs://QmDoc", type: "application/pdf" });
-    expect(built.files).toHaveLength(3);
-  });
-
-  test("withPlaceholderAssets fills image and files and drops images and documents", () => {
-    const metadata = { ...make(), documents: [{ file: "r.pdf" }] };
-    expect(withPlaceholderAssets(metadata)).toEqual({ name: "Stone", image: "ipfs://pending", files: [] });
-  });
-
-  test("collectDocuments is optional and sets MIME types", () => {
-    expect(collectDocuments({}, dir)).toEqual({ documents: [], problems: [] });
-    const { documents } = collectDocuments(
-      { documents: [{ file: "r.PDF", description: "Receipt" }, { file: "scan.glb" }] },
+  test("collectImages names a missing file, a refused type and a repeated photo", () => {
+    const { problems } = collectImages(
+      {
+        main_image: { file: "a.jpg" },
+        images: [{}, { file: "b.gif" }, { file: "c.heic" }, { file: "d.tiff" }, { file: "a.jpg" }],
+      },
       dir,
     );
-    expect(documents).toEqual([
-      { file: path.join(dir, "r.PDF"), description: "Receipt", mime: "application/pdf" },
-      { file: path.join(dir, "scan.glb"), description: "", mime: "model/gltf-binary" },
-    ]);
-  });
-
-  test("collectDocuments names an entry with no file or an unsupported type", () => {
-    const { problems } = collectDocuments({ documents: [{}, { file: "a.jpg" }] }, dir);
     expect(problems).toEqual([
-      "documents[0].file is missing",
-      'documents[1].file "a.jpg" is not a supported document type (pdf, glb)',
+      "images[0].file is missing",
+      'images[1].file "b.gif": GIF has 256 colours; upload a JPEG, PNG or WebP photo',
+      'images[2].file "c.heic": HEIC (an iPhone photo) is not supported; export or share it as JPEG',
+      'images[3].file "d.tiff" is not a JPEG, PNG or WebP photo',
+      'images[4].file "a.jpg" is already main_image; list each photo once',
     ]);
   });
 
-  test("buildMetadata adds documents after the images, none of them default", () => {
-    const metadata = make();
-    const { images } = collectImages(metadata, dir);
-    const { documents } = collectDocuments({ documents: [{ file: "r.pdf", description: "Receipt" }] }, dir);
-    const cids = new Map([[images[0].file, "QmThumb"], [images[1].file, "QmSide"], [documents[0].file, "QmReceipt"]]);
-    const built = buildMetadata(metadata, images, cids, documents);
+  test("collectImages allows at most 5 photos besides main_image", () => {
+    const images = Array.from({ length: 6 }, (_, i) => ({ file: `${i}.jpg` }));
+    expect(collectImages({ main_image: { file: "m.jpg" }, images }, dir).problems).toEqual([
+      "images lists 6 photos; at most 5 besides main_image",
+    ]);
+  });
 
-    expect(built.files.map((f) => f.uri)).toEqual(["ipfs://QmThumb", "ipfs://QmSide", "ipfs://QmReceipt"]);
-    expect(built.files[2]).toEqual({ uri: "ipfs://QmReceipt", type: "application/pdf", metadata: { description: "Receipt" } });
+  const versions = (n, main, checksum) => ({
+    master: { file: `/g/0${n}-master.jpg`, mime: "image/jpeg", ...(checksum && { checksum }) },
+    ...(main && { display: { file: `/g/0${n}-display.jpg`, mime: "image/jpeg" } }),
+  });
+  const photos = (checksum) => [
+    { main: true, description: "Front view", versions: versions(1, true, checksum) },
+    { main: false, description: "Side view", versions: versions(2, false, checksum) },
+  ];
+
+  test("buildMetadata: image is the display version, files has one entry per master", () => {
+    const cids = new Map([
+      ["/g/01-master.jpg", "QmMaster1"],
+      ["/g/01-display.jpg", "QmDisplay"],
+      ["/g/02-master.jpg", "QmMaster2"],
+    ]);
+    const built = buildMetadata(make(), photos("ab".repeat(32)), cids);
+    expect(built.main_image).toBeUndefined();
+    expect(built.images).toBeUndefined();
+    expect(built.image).toBe("ipfs://QmDisplay");
+    expect(built.type).toBe("image/jpeg");
+    expect(built.files).toEqual([
+      { uri: "ipfs://QmMaster1", type: "image/jpeg", is_default_file: true, checksum: "ab".repeat(32), metadata: { description: "Front view" } },
+      { uri: "ipfs://QmMaster2", type: "image/jpeg", is_default_file: false, checksum: "ab".repeat(32), metadata: { description: "Side view" } },
+    ]);
+  });
+
+  test("buildMetadata uses placeholder URIs and no checksum before the files are written", () => {
+    const built = buildMetadata(make(), photos());
+    expect(built.image).toBe("ipfs://pending");
+    expect(built.files.map((f) => [f.uri, "checksum" in f])).toEqual([
+      ["ipfs://pending", false],
+      ["ipfs://pending", false],
+    ]);
+  });
+
+  test("buildMetadata keeps files already in the metadata and adds documents last", () => {
+    const metadata = { ...make(), files: [{ uri: "ipfs://QmOld", type: "model/gltf-binary" }] };
+    const documents = [{ file: "/g/permit.pdf", mime: "application/pdf", description: "Permit" }];
+    const built = buildMetadata(metadata, photos(), new Map([["/g/permit.pdf", "QmPermit"]]), documents);
+    expect(built.files[0]).toEqual({ uri: "ipfs://QmOld", type: "model/gltf-binary" });
+    expect(built.files.at(-1)).toEqual({
+      uri: "ipfs://QmPermit",
+      type: "application/pdf",
+      metadata: { description: "Permit" },
+    });
   });
 });
 

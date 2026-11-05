@@ -98,6 +98,11 @@
           "uri": { "type": "string", "pattern": "^ipfs://.*" },
           "type": { "type": "string" },
           "is_default_file": { "type": "boolean" },
+          "checksum": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "description": "SHA-256 of the pinned file, set on each photo master so a buyer can check the archived photo was not altered (umina-achala-chain#7)"
+          },
           "metadata": { "type": "object" }
         }
       }

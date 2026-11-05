@@ -8,6 +8,7 @@ import fs from "fs";
 import path from "path";
 import { parseEcdsaKey } from "../keys.js";
 import { submitKeyProblem } from "../hcs.js";
+import { MAX_OTHER_IMAGES } from "./images.js";
 
 const HEDERA_ID = /^0\.0\.\d+$/;
 // UMINA-YYYY-XX-NN, for example UMINA-2026-CH-03 (CH = chrysocolla)
@@ -82,12 +83,12 @@ export async function pinJson(json, name, jwt, fetchFn = fetch) {
   return IpfsHash;
 }
 
-const MIME_TYPES = {
-  ".jpg": "image/jpeg",
-  ".jpeg": "image/jpeg",
-  ".png": "image/png",
-  ".webp": "image/webp",
-  ".gif": "image/gif",
+// Accepted photo extensions; the real type is checked with sharp later (#7)
+const IMAGE_EXTENSIONS = [".jpg", ".jpeg", ".png", ".webp"];
+const REFUSED_EXTENSIONS = {
+  ".gif": "GIF has 256 colours; upload a JPEG, PNG or WebP photo",
+  ".heic": "HEIC (an iPhone photo) is not supported; export or share it as JPEG",
+  ".heif": "HEIC (an iPhone photo) is not supported; export or share it as JPEG",
 };
 
 const DOCUMENT_TYPES = {
@@ -126,34 +127,57 @@ export function collectDocuments(metadata, baseDir) {
 }
 
 /**
- * Reads the input-only `images` list from the metadata: each entry has a
+ * Reads the input-only photo fields from the metadata (umina-achala-chain#7):
+ * `main_image` (required; its display version becomes `image` and its master
+ * is the default file) and `images` (optional, at most 5 more). Each has a
  * `file` (relative to the metadata file) and an optional `description`.
- * Returns the images with absolute paths and MIME types, plus any problems.
+ * Returns the photos in order, the main one first with index 1, with
+ * absolute paths, plus any problems.
  */
 export function collectImages(metadata, baseDir) {
   const images = [];
   const problems = [];
-  const list = metadata.images ?? [];
-  if (!Array.isArray(list) || list.length === 0) {
-    problems.push("images must list at least one image file");
-    return { images, problems };
-  }
-  list.forEach((entry, i) => {
+  const add = (entry, label, main) => {
     if (typeof entry?.file !== "string" || !entry.file) {
-      problems.push(`images[${i}].file is missing`);
+      problems.push(`${label}.file is missing`);
       return;
     }
-    const mime = MIME_TYPES[path.extname(entry.file).toLowerCase()];
-    if (!mime) {
-      problems.push(`images[${i}].file "${entry.file}" is not a supported image type`);
+    const ext = path.extname(entry.file).toLowerCase();
+    if (REFUSED_EXTENSIONS[ext]) {
+      problems.push(`${label}.file "${entry.file}": ${REFUSED_EXTENSIONS[ext]}`);
+      return;
+    }
+    if (!IMAGE_EXTENSIONS.includes(ext)) {
+      problems.push(`${label}.file "${entry.file}" is not a JPEG, PNG or WebP photo`);
+      return;
+    }
+    const file = path.resolve(baseDir, entry.file);
+    const earlier = images.find((img) => img.file === file);
+    if (earlier) {
+      problems.push(`${label}.file "${entry.file}" is already ${earlier.label}; list each photo once`);
       return;
     }
     images.push({
-      file: path.resolve(baseDir, entry.file),
+      file,
       description: entry.description ?? "",
-      mime,
+      label,
+      main,
+      index: images.length + 1,
     });
-  });
+  };
+  if (!metadata.main_image) {
+    problems.push("main_image is required: the photo whose display version becomes `image`");
+  } else {
+    add(metadata.main_image, "main_image", true);
+  }
+  const others = metadata.images ?? [];
+  if (!Array.isArray(others)) {
+    problems.push("images must be a list");
+  } else if (others.length > MAX_OTHER_IMAGES) {
+    problems.push(`images lists ${others.length} photos; at most ${MAX_OTHER_IMAGES} besides main_image`);
+  } else {
+    others.forEach((entry, i) => add(entry, `images[${i}]`, false));
+  }
   return { images, problems };
 }
 
@@ -175,33 +199,37 @@ export function samplesFolderProblem(images, samplesDir) {
 }
 
 /**
- * Builds the HIP-412 metadata that gets pinned: drops the input-only `images`
- * and `documents` lists, adds one `files[]` entry per image (the first is the
- * default file) and then one per document, and sets `image` and `type` from
- * the first image unless the file already has them. Files with no CID yet get
- * a placeholder ipfs:// URI, so the schema can be checked before anything is
- * pinned.
+ * Builds the HIP-412 metadata that gets pinned (umina-achala-chain#7): drops
+ * the input-only `main_image`, `images` and `documents`; sets `image` and
+ * `type` from the main image's display version; adds one `files[]` entry per
+ * photo master (the main image's is the default file; each has its SHA-256
+ * `checksum` once written) and then one per document. Files with no CID yet
+ * get a placeholder ipfs:// URI, so the schema can be checked before anything
+ * is pinned.
+ * @param {object} metadata
+ * @param {Array<{ main: boolean, description: string, versions: object }>} images
+ *   from collectImages, with `versions` from planVersions or writeVersions
  */
 export function buildMetadata(metadata, images, cidsByFile = new Map(), documents = []) {
-  const { images: _images, documents: _documents, ...rest } = structuredClone(metadata);
+  const { main_image: _main, images: _images, documents: _documents, ...rest } =
+    structuredClone(metadata);
   const uri = (item) => `ipfs://${cidsByFile.get(item.file) ?? "pending"}`;
-  const entry = (item, isDefault) => ({
-    uri: uri(item),
-    type: item.mime,
-    ...(isDefault !== undefined && { is_default_file: isDefault }),
-    metadata: { description: item.description },
+  const master = (img) => ({
+    uri: uri(img.versions.master),
+    type: img.versions.master.mime,
+    is_default_file: img.main,
+    ...(img.versions.master.checksum && { checksum: img.versions.master.checksum }),
+    metadata: { description: img.description },
   });
+  const document = (doc) => ({ uri: uri(doc), type: doc.mime, metadata: { description: doc.description } });
   const built = {
     ...rest,
-    files: [
-      ...(rest.files ?? []),
-      ...images.map((img, i) => entry(img, i === 0)),
-      ...documents.map((doc) => entry(doc)),
-    ],
+    files: [...(rest.files ?? []), ...images.map(master), ...documents.map(document)],
   };
-  if (images.length) {
-    built.image ??= uri(images[0]);
-    built.type ??= images[0].mime;
+  const main = images.find((img) => img.main);
+  if (main) {
+    built.image = uri(main.versions.display);
+    built.type = main.versions.display.mime;
   }
   return built;
 }
@@ -212,7 +240,8 @@ export function buildMetadata(metadata, images, cidsByFile = new Map(), document
  * `image` and `files` with placeholders when they are absent.
  */
 export function withPlaceholderAssets(metadata) {
-  const { images: _images, documents: _documents, ...rest } = structuredClone(metadata);
+  const { main_image: _main, images: _images, documents: _documents, ...rest } =
+    structuredClone(metadata);
   return { ...rest, image: rest.image ?? "ipfs://pending", files: rest.files ?? [] };
 }
 

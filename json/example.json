@@ -4,6 +4,8 @@
   "description": "Certified Mine-to-Market Chrysocolla. Extracted from Arequipa Region with verified ethical provenance and full regulatory compliance.",
   "format": "HIP412@2.0.0",
   "metadata_version": "1.0.0",
+  "main_image": { "file": "../samples/master.jpg", "description": "Front view" },
+  "images": [{ "file": "../samples/thumb.jpg", "description": "Back view" }],
   "properties": {
     "stone_id": "UMINA-2026-CH-03",
     "stone_type": "chrysocolla",

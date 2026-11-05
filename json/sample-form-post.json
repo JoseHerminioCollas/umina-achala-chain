@@ -17,14 +17,14 @@
     "Date Mined": "2026-02-14",
     "Stone Cut": "Cabochon"
   },
+  "main_image": {
+    "file": "../samples/master.jpg",
+    "description": "Front view"
+  },
   "images": [
     {
       "file": "../samples/thumb.jpg",
-      "description": "Front view, thumbnail"
-    },
-    {
-      "file": "../samples/master.jpg",
-      "description": "High-resolution master image"
+      "description": "Back view"
     }
   ],
   "documents": [

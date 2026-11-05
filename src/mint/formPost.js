@@ -2,7 +2,7 @@
  * @file formPost.js
  * @description Turns a mint form post into the metadata JSON file that
  * mintUminaNFT.js reads. The post is simulated by a JSON file: the form's text
- * fields, plus the uploaded `images` and `documents`, each with a `file` (a
+ * fields, plus the uploaded `main_image`, `images` and `documents`, each with a `file` (a
  * path relative to the post) and a `description`.
  *
  * The metadata starts as a copy of json/template.json (fixed fields keep their
@@ -14,7 +14,7 @@
 import fs from "fs";
 import path from "path";
 
-const RESERVED = ["name", "description", "attributes", "images", "documents"];
+const RESERVED = ["name", "description", "attributes", "main_image", "images", "documents"];
 
 /** Converts the form's `attributes` map into pairs, skipping empty values. */
 function toAttributes(attributes = {}) {
@@ -60,6 +60,7 @@ export function metadataFromForm(form, template, baseDir) {
     ...Object.fromEntries(Object.entries(form).filter(([key]) => !RESERVED.includes(key))),
   });
   filled.attributes = toAttributes(form.attributes);
+  if (form.main_image) filled.main_image = resolveUploads([form.main_image], baseDir)[0];
   filled.images = resolveUploads(form.images, baseDir);
   filled.documents = resolveUploads(form.documents, baseDir);
   return prune(filled);
