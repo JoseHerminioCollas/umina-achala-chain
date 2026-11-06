@@ -1,10 +1,13 @@
 /**
  * @file createUminaToken.js
- * @description Creates the Umiña NFT Class on Hedera TESTNET,
- * defining it as a non-fungible token with a custom royalty fee and role keys.
+ * @description Creates an NFT class on Hedera TESTNET, defining it as a
+ * non-fungible token with a custom royalty fee and role keys: the Umiña
+ * class (stones, the default) or, with --token achala, the Achala class
+ * (jewelry set with Umiña stones, umina-achala-chain#15). Both classes share
+ * every setting except name, symbol and memo.
  *
  * Run from the command line:
- * node src/token/createUminaToken.js [env-file] [--dry-run]
+ * node src/token/createUminaToken.js [env-file] [--token umina|achala] [--dry-run]
  *
  * The env file defaults to .env.testnet. --dry-run checks the environment and
  * prints the token parameters without keys and without touching the network.
@@ -14,19 +17,34 @@
 import dotenv from "dotenv";
 import path from "path";
 import { Client } from "@hashgraph/sdk";
-import { buildTokenTransaction, describeToken, loadKeys, validateEnv } from "./lib.js";
+import {
+  buildTokenTransaction,
+  describeToken,
+  loadKeys,
+  TOKEN_CLASSES,
+  validateEnv,
+} from "./lib.js";
 import { parseEcdsaKey } from "../keys.js";
 
 const args = process.argv.slice(2);
 const dryRun = args.includes("--dry-run");
-const envFile = args.find((a) => !a.startsWith("--")) ?? ".env.testnet";
+const tokenIndex = args.indexOf("--token");
+const tokenClass = tokenIndex === -1 ? "umina" : args[tokenIndex + 1];
+const envFile =
+  args.find((a, i) => !a.startsWith("--") && args[i - 1] !== "--token") ?? ".env.testnet";
 // The client below is always testnet, so refuse a file meant for another
 // network rather than send its credentials to the wrong one.
 const testnetOnly = path.basename(envFile).includes("testnet");
 if (testnetOnly) dotenv.config({ path: envFile });
 
 async function main() {
-  console.log("🚀 Creating Umiña NFT Class...");
+  const tokenSettings = TOKEN_CLASSES[tokenClass];
+  if (!tokenSettings) {
+    console.error(`❌ --token must be ${Object.keys(TOKEN_CLASSES).join(" or ")}, got "${tokenClass}"`);
+    process.exitCode = 1;
+    return;
+  }
+  console.log(`🚀 Creating ${tokenSettings.name} NFT Class...`);
 
   if (!testnetOnly) {
     console.error(
@@ -47,11 +65,11 @@ async function main() {
 
   // --- 2. Load role keys and build the transaction ---
   const keys = loadKeys(process.env);
-  const transaction = buildTokenTransaction(process.env, keys);
+  const transaction = buildTokenTransaction(process.env, keys, tokenClass);
 
   if (dryRun) {
     console.log("Dry run, nothing sent:");
-    console.log(describeToken(process.env, keys));
+    console.log(describeToken(process.env, keys, tokenClass));
     return;
   }
 
@@ -73,9 +91,9 @@ async function main() {
     const response = await frozen.execute(client);
     const receipt = await response.getReceipt(client);
     console.log("-----------------------------------");
-    console.log(`✅ Success! Umiña Token ID: ${receipt.tokenId}`);
+    console.log(`✅ Success! ${tokenSettings.name} Token ID: ${receipt.tokenId}`);
     console.log("-----------------------------------");
-    console.log(`SAVE THIS ID IN ${envFile} AS: UMINA_TOKEN_ID`);
+    console.log(`SAVE THIS ID IN ${envFile} AS: ${tokenSettings.envVar}`);
   } catch (err) {
     console.error("❌ Token creation failed:", err, {
       operatorId,

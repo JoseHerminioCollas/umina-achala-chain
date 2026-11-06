@@ -214,6 +214,16 @@ describe("adminToken.js", () => {
     expect(calls.forTestnet).not.toHaveBeenCalled();
   });
 
+  test("--token achala burns an Achala NFT (a disassembled piece) and records BURN under that token", async () => {
+    process.env.ACHALA_TOKEN_ID = "0.0.4004";
+    mockDependencies({ holder: "0.0.1001" });
+    await runScript("burn", "3", "--reason", "Piece disassembled", "--token", "achala");
+
+    expect(calls.infoFor).toBe("0.0.4004/3");
+    expect(step("burn").calls.setTokenId[0].toString()).toBe("0.0.4004");
+    expect(event()).toMatchObject({ event: "BURN", token_id: "0.0.4004", serials: ["3"], reason: "Piece disassembled" });
+  });
+
   test("lists problems and sends nothing", async () => {
     delete process.env.WIPE_KEY;
     mockDependencies();

@@ -66,6 +66,21 @@ describe("parseAdminArgs", () => {
     ]);
   });
 
+  test("--token picks the class, umina by default", () => {
+    expect(parseAdminArgs(["pause"]).tokenClass).toBe("umina");
+    expect(parseAdminArgs(["burn", "3", "--reason", "Disassembled", "--token", "achala"]).tokenClass).toBe("achala");
+    expect(parseAdminArgs(["pause", "--token", "gems"]).problems).toEqual([
+      '--token must be umina or achala, got "gems"',
+    ]);
+  });
+
+  test("an Achala command needs ACHALA_TOKEN_ID, not UMINA_TOKEN_ID", () => {
+    const e = env();
+    delete e.UMINA_TOKEN_ID;
+    expect(adminEnvProblems(e, "burn", "achala")).toEqual(["ACHALA_TOKEN_ID is not set"]);
+    expect(adminEnvProblems({ ...e, ACHALA_TOKEN_ID: "0.0.4004" }, "burn", "achala")).toEqual([]);
+  });
+
   test("needs a known command", () => {
     expect(parseAdminArgs(["delete"]).problems).toEqual([
       "give the command: fees, pause, unpause, wipe, burn",

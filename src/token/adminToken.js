@@ -15,7 +15,12 @@
  *     Burns a serial that is still in the treasury.
  *
  * Run from the command line:
- * node src/token/adminToken.js <command> [serial] [options] [--dry-run]
+ * node src/token/adminToken.js <command> [serial] [options] [--token umina|achala] [--dry-run]
+ *
+ * --token chooses the token class (default umina, UMINA_TOKEN_ID). Use
+ * --token achala (ACHALA_TOKEN_ID) for the jewelry class, e.g. to burn the
+ * Achala NFT of a piece that is disassembled; its Umiña NFTs are kept
+ * (umina-achala-chain#16).
  *
  * wipe and burn change an item, so they record a BURN event in the
  * provenance topic (#10) with the reason and how it happened (method "wipe"
@@ -37,7 +42,13 @@ import {
   TokenUnpauseTransaction,
   TokenWipeTransaction,
 } from "@hashgraph/sdk";
-import { adminEnvProblems, ADMIN_COMMANDS, buildRoyaltyFee, parseAdminArgs } from "./lib.js";
+import {
+  adminEnvProblems,
+  ADMIN_COMMANDS,
+  buildRoyaltyFee,
+  parseAdminArgs,
+  TOKEN_CLASSES,
+} from "./lib.js";
 import { parseEcdsaKey } from "../keys.js";
 import { buildEvent, loadSubmitKey, submitEvent } from "../hcs.js";
 
@@ -92,10 +103,10 @@ async function main() {
     // --- 1. Check the command and the environment ---
     const input = parseAdminArgs(process.argv.slice(2));
     if (input.problems.length) return fail(input.problems);
-    const envProblems = adminEnvProblems(process.env, input.command);
+    const envProblems = adminEnvProblems(process.env, input.command, input.tokenClass);
     if (envProblems.length) return fail(envProblems);
 
-    const tokenId = TokenId.fromString(process.env.UMINA_TOKEN_ID);
+    const tokenId = TokenId.fromString(process.env[TOKEN_CLASSES[input.tokenClass].envVar]);
     const { key } = ADMIN_COMMANDS[input.command];
     console.log(`Would ${describe(input, process.env, tokenId)}, signed by ${key}.`);
     if (input.dryRun) {

@@ -3,6 +3,7 @@ import {
   buildTokenTransaction,
   describeToken,
   loadKeys,
+  TOKEN_CLASSES,
   validateEnv,
 } from "../src/token/lib.js";
 
@@ -157,5 +158,43 @@ describe("describeToken", () => {
     expect(text).toContain("38 HBAR");
     expect(text).not.toContain('"metadata"');
     expect(text).not.toContain(operatorKey);
+  });
+});
+
+describe("the Achala class (umina-achala-chain#15)", () => {
+  const env = makeEnv();
+  const keys = loadKeys(env);
+  const achala = buildTokenTransaction(env, keys, "achala");
+  const umina = buildTokenTransaction(env, keys);
+
+  test("has its own name, symbol and memo", () => {
+    expect(achala.tokenName).toBe("Achala");
+    expect(achala.tokenSymbol).toBe("ACHALA");
+    expect(achala.tokenMemo).toBe("Umiña Achala: Peruvian Jewelry Set with Certified Umiña Stones");
+    expect(TOKEN_CLASSES.achala.envVar).toBe("ACHALA_TOKEN_ID");
+  });
+
+  test("shares every other setting with Umiña: type, supply, keys, no metadata key, fees", () => {
+    expect(achala.tokenType).toBe(umina.tokenType);
+    expect(achala.supplyType).toBe(TokenSupplyType.Infinite);
+    for (const k of ["adminKey", "supplyKey", "feeScheduleKey", "pauseKey", "wipeKey"]) {
+      expect(achala[k].toString()).toBe(umina[k].toString());
+    }
+    expect(achala.metadataKey).toBeNull();
+    expect(achala.treasuryAccountId.toString()).toBe(umina.treasuryAccountId.toString());
+    expect(achala.autoRenewAccountId.toString()).toBe(umina.autoRenewAccountId.toString());
+    const [a] = achala.customFees;
+    const [u] = umina.customFees;
+    expect([a.numerator.toNumber(), a.denominator.toNumber()]).toEqual([u.numerator.toNumber(), u.denominator.toNumber()]);
+    expect(a.fallbackFee.hbarAmount.toTinybars().toString()).toBe(u.fallbackFee.hbarAmount.toTinybars().toString());
+  });
+
+  test("describeToken names the class and where to save its ID", () => {
+    expect(describeToken(env, keys, "achala")).toMatchObject({
+      name: "Achala",
+      symbol: "ACHALA",
+      saveIdAs: "ACHALA_TOKEN_ID",
+    });
+    expect(describeToken(env, keys).saveIdAs).toBe("UMINA_TOKEN_ID");
   });
 });

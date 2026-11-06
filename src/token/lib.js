@@ -20,6 +20,22 @@ import { submitKeyProblem } from "../hcs.js";
 export const TOKEN_NAME = "Umiña";
 export const TOKEN_SYMBOL = "UMINA";
 export const TOKEN_MEMO = "Umiña Achala: Authentic Peruvian Stones and Minerals";
+
+/**
+ * The token classes UA creates (umina-achala-chain#15): Umiña for stones and
+ * Achala for jewelry set with Umiña stones. Both share every other setting
+ * (keys, no metadata key, royalty and fallback fee, infinite supply); each
+ * has its own name, symbol, memo and env variable for its ID.
+ */
+export const TOKEN_CLASSES = {
+  umina: { name: TOKEN_NAME, symbol: TOKEN_SYMBOL, memo: TOKEN_MEMO, envVar: "UMINA_TOKEN_ID" },
+  achala: {
+    name: "Achala",
+    symbol: "ACHALA",
+    memo: "Umiña Achala: Peruvian Jewelry Set with Certified Umiña Stones",
+    envVar: "ACHALA_TOKEN_ID",
+  },
+};
 export const ROYALTY = { numerator: 5, denominator: 100 };
 
 const ACCOUNT_ID = /^0\.0\.\d+$/;
@@ -114,12 +130,13 @@ export function buildRoyaltyFee(treasuryId, fallbackHbar, royalty = ROYALTY) {
     .setFallbackFee(new CustomFixedFee().setHbarAmount(Hbar.fromString(fallbackHbar)));
 }
 
-export function buildTokenTransaction(env, keys) {
+export function buildTokenTransaction(env, keys, tokenClass = "umina") {
   const treasuryId = env.TREASURY_ID;
+  const { name, symbol, memo } = TOKEN_CLASSES[tokenClass];
 
   return new TokenCreateTransaction()
-    .setTokenName(TOKEN_NAME)
-    .setTokenSymbol(TOKEN_SYMBOL)
+    .setTokenName(name)
+    .setTokenSymbol(symbol)
     .setTokenType(TokenType.NonFungibleUnique)
     // Roles
     .setTreasuryAccountId(treasuryId)
@@ -136,21 +153,23 @@ export function buildTokenTransaction(env, keys) {
     .setSupplyType(TokenSupplyType.Infinite)
     .setInitialSupply(0)
     .setDecimals(0)
-    .setTokenMemo(TOKEN_MEMO);
+    .setTokenMemo(memo);
 }
 
 /** Plain-text summary of the token parameters, with no keys in it. */
-export function describeToken(env, keys) {
+export function describeToken(env, keys, tokenClass = "umina") {
+  const { name, symbol, memo, envVar } = TOKEN_CLASSES[tokenClass];
   return {
-    name: TOKEN_NAME,
-    symbol: TOKEN_SYMBOL,
+    name,
+    symbol,
+    saveIdAs: envVar,
     type: "NonFungibleUnique",
     supplyType: "Infinite",
     treasury: env.TREASURY_ID,
     autoRenewAccount: env.TREASURY_ID,
     royalty: `${ROYALTY.numerator}/${ROYALTY.denominator} to ${env.TREASURY_ID}`,
     fallbackFee: `${env.FALLBACK_FEE_HBAR} HBAR`,
-    memo: TOKEN_MEMO,
+    memo,
     roles: ["admin", "supply", "feeSchedule", "pause", "wipe"],
     metadataKey: "none (NFT metadata is immutable)",
     treasurySignsSeparately: Boolean(keys.treasury),
@@ -170,6 +189,7 @@ export const ADMIN_COMMANDS = {
 
 const ADMIN_OPTIONS = {
   "dry-run": { type: "boolean" },
+  token: { type: "string" },
   "fallback-hbar": { type: "string" },
   royalty: { type: "string" },
   account: { type: "string" },
@@ -195,7 +215,18 @@ export function parseAdminArgs(argv) {
     return { problems: [err.message] };
   }
   const [command, serial] = positionals;
-  const input = { command, serial, dryRun: Boolean(values["dry-run"]) };
+  const input = {
+    command,
+    serial,
+    dryRun: Boolean(values["dry-run"]),
+    tokenClass: values.token ?? "umina",
+  };
+  if (!TOKEN_CLASSES[input.tokenClass]) {
+    return {
+      ...input,
+      problems: [`--token must be ${Object.keys(TOKEN_CLASSES).join(" or ")}, got "${input.tokenClass}"`],
+    };
+  }
   if (!ADMIN_COMMANDS[command]) {
     return { ...input, problems: [`give the command: ${Object.keys(ADMIN_COMMANDS).join(", ")}`] };
   }
@@ -232,9 +263,9 @@ export function parseAdminArgs(argv) {
 }
 
 /** Lists the problems with the environment for one admin command. */
-export function adminEnvProblems(env, command) {
+export function adminEnvProblems(env, command, tokenClass = "umina") {
   const { key, records } = ADMIN_COMMANDS[command];
-  const needed = ["OPERATOR_ID", "OPERATOR_KEY", "UMINA_TOKEN_ID", key];
+  const needed = ["OPERATOR_ID", "OPERATOR_KEY", TOKEN_CLASSES[tokenClass].envVar, key];
   if (command === "fees" || command === "burn") needed.push("TREASURY_ID");
   if (records) needed.push("HCS_TOPIC_ID");
   const problems = needed.filter((k) => !env[k]).map((k) => `${k} is not set`);

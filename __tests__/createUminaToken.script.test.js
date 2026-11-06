@@ -37,7 +37,10 @@ function mockDependencies({ executeError } = {}) {
         return { getReceipt: async () => ({ tokenId: "0.0.9999" }) };
       }),
     };
-    return { ...actual, buildTokenTransaction: jest.fn(() => tx) };
+    return {
+      ...actual,
+      buildTokenTransaction: jest.fn((env, keys, tokenClass) => ((calls.tokenClass = tokenClass), tx)),
+    };
   });
 }
 
@@ -135,8 +138,34 @@ describe("createUminaToken.js", () => {
     expect(log).toHaveBeenCalledWith(
       "SAVE THIS ID IN .env.testnet AS: UMINA_TOKEN_ID",
     );
+    expect(calls.tokenClass).toBe("umina");
     expect(calls.close).toHaveBeenCalled();
     expect(process.exitCode).toBeUndefined();
+  });
+
+  test("--token achala creates the Achala class and says to save it as ACHALA_TOKEN_ID", async () => {
+    mockDependencies();
+    await runScript("--token", "achala");
+
+    expect(calls.tokenClass).toBe("achala");
+    expect(log).toHaveBeenCalledWith("✅ Success! Achala Token ID: 0.0.9999");
+    expect(log).toHaveBeenCalledWith("SAVE THIS ID IN .env.testnet AS: ACHALA_TOKEN_ID");
+  });
+
+  test("--token's value is not taken for the env file", async () => {
+    mockDependencies();
+    await runScript("--token", "achala", ".env.testnet.local", "--dry-run");
+
+    expect(calls.dotenv).toHaveBeenCalledWith({ path: ".env.testnet.local" });
+  });
+
+  test("refuses an unknown --token and sends nothing", async () => {
+    mockDependencies();
+    await runScript("--token", "gems");
+
+    expect(console.error).toHaveBeenCalledWith('❌ --token must be umina or achala, got "gems"');
+    expect(calls.signed).toEqual([]);
+    expect(process.exitCode).toBe(1);
   });
 
   test("also signs with TREASURY_KEY when the treasury is another account", async () => {
