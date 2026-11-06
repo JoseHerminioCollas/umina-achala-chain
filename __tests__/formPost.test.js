@@ -3,8 +3,8 @@ import os from "os";
 import path from "path";
 import { metadataFromForm, writeGeneratedMetadata } from "../src/mint/formPost.js";
 
-const template = JSON.parse(fs.readFileSync("json/template.json", "utf8"));
-const example = JSON.parse(fs.readFileSync("json/example.json", "utf8"));
+const template = JSON.parse(fs.readFileSync("json/umina-template.json", "utf8"));
+const example = JSON.parse(fs.readFileSync("json/umina-example.json", "utf8"));
 const schema = JSON.parse(fs.readFileSync("schema/hip412-umina-schema.json", "utf8"));
 const base = path.join(os.tmpdir(), "form-post");
 
@@ -103,8 +103,8 @@ describe("writeGeneratedMetadata", () => {
   });
 });
 
-describe("json/template.json", () => {
-  test("has every property the schema lists and every property in example.json", () => {
+describe("json/umina-template.json", () => {
+  test("has every property the schema lists and every property in umina-example.json", () => {
     const names = [
       ...Object.keys(schema.properties.properties.properties),
       ...Object.keys(example.properties),

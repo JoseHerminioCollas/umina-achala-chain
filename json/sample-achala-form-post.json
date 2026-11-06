@@ -1,0 +1,17 @@
+{
+  "name": "Achala Pendant #99 - Chrysocolla in Silver",
+  "description": "Sample pendant with a certified Umiña chrysocolla in 950 silver, submitted through the mint form (fake data for testing).",
+  "stone_id": "ACHALA-2026-PE-99",
+  "piece_type": "pendant",
+  "stones": [{ "serial": 3, "stone_id": "UMINA-2026-CH-99" }],
+  "metals": [{ "stone_type": "silver", "fineness": "950", "weight_g": 6.5, "source": "invoice" }],
+  "technique": "Wire wrapping",
+  "artisan_rna": "RNA-112233",
+  "hs_code": "7113.11.00.00",
+  "jurisdiction": "Peru",
+  "legal_uri": "https://umina-achala.pe/",
+  "vendor_ruc": "20999887768",
+  "attributes": { "Chain Length": "45 cm" },
+  "main_image": { "file": "../samples/master.jpg", "description": "Front view" },
+  "documents": [{ "file": "../samples/store-receipt.pdf", "description": "Silver invoice (sample, fake)" }]
+}

@@ -1,11 +1,11 @@
 /**
  * @file formPost.js
  * @description Turns a mint form post into the metadata JSON file that
- * mintUminaNFT.js reads. The post is simulated by a JSON file: the form's text
+ * mintNFT.js reads. The post is simulated by a JSON file: the form's text
  * fields, plus the uploaded `main_image`, `images` and `documents`, each with a `file` (a
  * path relative to the post) and a `description`.
  *
- * The metadata starts as a copy of json/template.json (fixed fields keep their
+ * The metadata starts as a copy of json/umina-template.json (fixed fields keep their
  * values, everything the form supplies is null) and is filled from the post.
  * Fields the post leaves empty are removed, so "absent" means "not provided"
  * and a missing compliance field fails validation instead of passing as "".

@@ -1,0 +1,32 @@
+{
+  "name": null,
+  "creator": "Umiña Achala",
+  "description": null,
+  "format": "HIP412@2.0.0",
+  "metadata_version": "1.0.0",
+  "properties": {
+    "stone_id": null,
+    "piece_type": null,
+    "umina_token_id": null,
+    "stones": null,
+    "metals": null,
+    "technique": null,
+    "artisan_rna": null,
+    "hs_code": null,
+    "jurisdiction": null,
+    "legal_uri": null,
+    "vendor_ruc": null,
+    "compliance_proof_hcs": null,
+    "hcs_compliance_topic": null,
+    "audit_log_uri": null,
+    "export_status": {
+      "is_exported": null,
+      "export_timestamp": null,
+      "export_permit_id": null
+    }
+  },
+  "attributes": [],
+  "main_image": null,
+  "images": [],
+  "documents": []
+}

@@ -1,20 +1,30 @@
 /**
- * Importable validator for HIP-412 Umiña metadata: the JSON schema, then the
- * checks a schema cannot express (umina-achala-chain#5, #14):
+ * Importable validator for HIP-412 Umiña and Achala metadata: the class's JSON
+ * schema, then the checks a schema cannot express (umina-achala-chain#5, #14,
+ * #16):
  * - properties.stone_type and properties.materials are ids from
  *   schema/stone-types.json, not deprecated and not fossils
  * - properties.vendor_ruc and properties.reinfo_id (the miner's RUC) have a
  *   valid SUNAT check digit; mining_concession is a 9-digit Código Único
  *   (the schema checks that)
+ * - for an Achala, achalaProblems in achala.js: each stone listed once, each
+ *   metal a metal, and where the metal comes from
  */
 import Ajv from "ajv";
 import addFormats from "ajv-formats";
-import schema from "../../schema/hip412-umina-schema.json" with { type: "json" };
+import uminaSchema from "../../schema/hip412-umina-schema.json" with { type: "json" };
+import achalaSchema from "../../schema/hip412-achala-schema.json" with { type: "json" };
 import { stoneTypeProblems } from "./stoneTypes.js";
+import { achalaProblems } from "./achala.js";
 
 const ajv = new Ajv({ allErrors: true, allowUnionTypes: true });
 addFormats(ajv);
-const validate = ajv.compile(schema);
+const validators = { umina: ajv.compile(uminaSchema), achala: ajv.compile(achalaSchema) };
+
+/** The class of a metadata file from its stone_id: achala for ACHALA-..., else umina. */
+export function classOfMetadata(metadata) {
+  return String(metadata?.properties?.stone_id ?? "").startsWith("ACHALA-") ? "achala" : "umina";
+}
 
 /**
  * True when an 11-digit RUC's last digit matches SUNAT's modulo-11 check
@@ -29,12 +39,13 @@ export function rucCheckDigitOk(ruc) {
 }
 
 /** The checks beyond the schema, as errors shaped like Ajv's. */
-export function complianceErrors(metadata) {
+export function complianceErrors(metadata, tokenClass = "umina") {
   const properties = metadata?.properties ?? {};
-  const errors = stoneTypeProblems(properties).map((message) => ({
-    instancePath: "/properties",
-    message,
-  }));
+  const problems =
+    tokenClass === "achala"
+      ? achalaProblems(properties, Array.isArray(metadata?.files) ? metadata.files : [])
+      : stoneTypeProblems(properties);
+  const errors = problems.map((message) => ({ instancePath: "/properties", message }));
   // REINFO profiles are tracked by the miner's RUC, so reinfo_id is a RUC too
   for (const field of ["vendor_ruc", "reinfo_id"]) {
     const ruc = properties[field];
@@ -48,8 +59,14 @@ export function complianceErrors(metadata) {
   return errors;
 }
 
-export function validateMetadata(metadata) {
+/**
+ * Validates metadata of a token class (umina or achala) against its schema
+ * and the checks above.
+ */
+export function validateMetadata(metadata, tokenClass = "umina") {
+  const validate = validators[tokenClass];
+  if (!validate) throw new Error(`no metadata schema for token class "${tokenClass}"`);
   const schemaValid = validate(metadata);
-  const errors = [...(validate.errors ?? []), ...complianceErrors(metadata)];
+  const errors = [...(validate.errors ?? []), ...complianceErrors(metadata, tokenClass)];
   return { valid: schemaValid && errors.length === 0, errors: errors.length ? errors : null };
 }

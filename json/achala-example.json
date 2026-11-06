@@ -1,0 +1,30 @@
+{
+  "name": "Achala Ring #01 - Chrysocolla in Gold",
+  "creator": "Umiña Achala",
+  "description": "Ring set with a certified Umiña chrysocolla, in 18k gold from a certified Umiña nugget (fake data for testing).",
+  "format": "HIP412@2.0.0",
+  "metadata_version": "1.0.0",
+  "main_image": { "file": "../samples/master.jpg", "description": "Front view" },
+  "images": [{ "file": "../samples/thumb.jpg", "description": "Side view" }],
+  "properties": {
+    "stone_id": "ACHALA-2026-RI-01",
+    "piece_type": "ring",
+    "umina_token_id": "0.0.2002",
+    "stones": [
+      { "serial": 3, "stone_id": "UMINA-2026-CH-03" },
+      { "serial": 4, "stone_id": "UMINA-2026-AU-01" }
+    ],
+    "metals": [
+      { "stone_type": "gold", "fineness": "18k", "weight_g": 4.2, "source": "umina", "stone_id": "UMINA-2026-AU-01" }
+    ],
+    "technique": "Bezel setting",
+    "artisan_rna": "RNA-112233",
+    "hs_code": "7113.19.00.00",
+    "jurisdiction": "Peru",
+    "legal_uri": "https://umina-achala.pe/",
+    "vendor_ruc": "20999887768"
+  },
+  "attributes": [
+    { "trait_type": "Ring Size", "value": "7" }
+  ]
+}

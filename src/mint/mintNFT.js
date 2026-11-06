@@ -1,10 +1,12 @@
 /**
- * @file mintUminaNFT.js
- * @description Mints an Umiña NFT on Hedera TESTNET: validates the HIP-412
- * metadata, pins its image and files to IPFS through Pinata, pins the metadata
- * itself, mints under the Umiña token, then notarizes the mint in HCS (pin,
- * mint, notarize, so the ledger never holds a MINT record for an NFT that does
- * not exist).
+ * @file mintNFT.js
+ * @description Mints an NFT on Hedera TESTNET, an Umiña (a stone, the
+ * default) or, with --token achala, an Achala (a piece of jewelry made of one
+ * or more Umiña NFTs, umina-achala-chain#16): validates the HIP-412 metadata
+ * against the class's schema, pins its image and files to IPFS through
+ * Pinata, pins the metadata itself, mints under the class's token, then
+ * notarizes the mint in HCS (pin, mint, notarize, so the ledger never holds a
+ * MINT record for an NFT that does not exist).
  *
  * The metadata file has no `image` or `files` of its own. Instead it names the
  * item's photos in input-only fields, `main_image` (required) and `images`
@@ -23,24 +25,35 @@
  * any credentials. --dry-run only lists the files it would make.
  *
  * Run from the command line:
- * node src/mint/mintUminaNFT.js [metadata-file | --form post-file] [--out dir] [--force] [--dry-run | --images-only]
+ * node src/mint/mintNFT.js [metadata-file | --form post-file] [--token umina|achala] [--out dir] [--force] [--dry-run | --images-only]
  *
  * With --form the input is a simulated mint form post (see formPost.js). The
- * metadata file is generated from it into --out (default generated/) and then
- * minted. Otherwise give the path of a metadata file. One of the two is
- * required. The properties.stone_id must follow UMINA-YYYY-XX-NN. Variables come from
- * .env.testnet. --dry-run checks the environment and the metadata and sends
- * nothing, but still writes the generated metadata file.
+ * metadata file is generated from it, starting from the class's template
+ * (json/umina-template.json or json/achala-template.json), into --out (default
+ * generated/) and then minted. Otherwise give the path of a metadata file.
+ * One of the two is required. properties.stone_id must follow
+ * UMINA-YYYY-XX-NN for an Umiña and ACHALA-YYYY-XX-NN for an Achala.
+ * Variables come from .env.testnet. --dry-run checks the environment and the
+ * metadata and sends nothing, but still writes the generated metadata file.
  *
  * Before pinning, a real run reads the HCS topic from the mirror node and
  * refuses a stone_id that already has a MINT event, or a topic that does not
  * exist (the mint would have nowhere to be recorded). --force skips the
- * duplicate check, not the topic check. Then a COMPLIANCE event (stone type,
- * RUC, concession, REINFO, HS code) is posted, and its transaction ID becomes
- * properties.compliance_proof_hcs in the pinned metadata. The Stone Type,
- * Materials and Form attributes are written from schema/stone-types.json.
- * If the run fails after pinning, the
- * CIDs pinned so far are printed so they can be unpinned in Pinata.
+ * duplicate check, not the topic check. For an Achala it also checks each of
+ * properties.stones (achala.js): in the Umiña token, matching its MINT event,
+ * not burned, held by the treasury and not mounted in another Achala; --force
+ * does not skip these. Then a COMPLIANCE event is posted (an Umiña: stone
+ * type, RUC, concession, REINFO, HS code; an Achala: piece type, artisan,
+ * RUC, HS code, stones), and its transaction ID becomes
+ * properties.compliance_proof_hcs in the pinned metadata. The attributes
+ * wallets show are written from the data (an Umiña: Stone Type, Materials,
+ * Form from schema/stone-types.json; an Achala: Piece Type, Metal, Stones,
+ * Artisan). If the run fails after pinning, the CIDs pinned so far are
+ * printed so they can be unpinned in Pinata.
+ *
+ * After the MINT event, each stone of an Achala gets a TRANSFORMATION event
+ * (kind "mounted") naming the Achala. If one fails, the stones still missing
+ * it are printed.
  *
  * ## Output
  * - IPFS CID of pinned metadata
@@ -55,14 +68,16 @@ import fs from "fs";
 import { validateMetadata } from "./metadataValidator.js";
 import { inspectImage, planVersions, writeVersions } from "./images.js";
 import path from "path";
-import { topicEvents } from "../mirror.js";
+import { nftInfo, topicEvents } from "../mirror.js";
 import {
   buildMetadata,
   checkStoneId,
   collectDocuments,
   collectImages,
   findMint,
+  MINT_CLASSES,
   missingAssets,
+  parseMintArgs,
   pinFile,
   pinJson,
   samplesFolderProblem,
@@ -70,54 +85,80 @@ import {
 } from "./lib.js";
 import { metadataFromForm, writeGeneratedMetadata } from "./formPost.js";
 import { withStoneTypeAttributes } from "./stoneTypes.js";
+import {
+  achalaComplianceFields,
+  mountedEvent,
+  stoneLedgerProblems,
+  stoneTypesFromEvents,
+  uminaTokenProblem,
+  withAchalaAttributes,
+  withUminaTokenId,
+} from "./achala.js";
+import { TOKEN_CLASSES } from "../token/lib.js";
 import { parseEcdsaKey } from "../keys.js";
 
-const args = process.argv.slice(2);
-const dryRun = args.includes("--dry-run");
-const imagesOnly = args.includes("--images-only");
-const force = args.includes("--force");
-const option = (name) => {
-  const i = args.indexOf(name);
-  return i === -1 ? undefined : args[i + 1];
-};
-const formFile = option("--form");
-const outDir = option("--out") ?? "generated";
-const valueOptions = ["--form", "--out"];
-const positional = args.filter(
-  (a, i) => !a.startsWith("--") && !valueOptions.includes(args[i - 1]),
-);
-let metadataFile = positional[0];
+const input = parseMintArgs(process.argv.slice(2));
+const { formFile, outDir, tokenClass, force, dryRun, imagesOnly } = input;
+let metadataFile = input.metadataFile;
+const isAchala = tokenClass === "achala";
 dotenv.config({ path: ".env.testnet" });
+
+function fail(problems) {
+  console.error("❌ Problems found:");
+  problems.forEach((p) => console.error(`   - ${p}`));
+  process.exitCode = 1;
+}
+
+/**
+ * An Achala's metadata with properties.umina_token_id set from
+ * UMINA_TOKEN_ID when it is absent; other metadata unchanged.
+ */
+function withStonesToken(metadata) {
+  return isAchala && process.env.UMINA_TOKEN_ID ? withUminaTokenId(metadata, process.env.UMINA_TOKEN_ID) : metadata;
+}
+
+/** The attributes wallets show, written from the data of the class. */
+function withGeneratedAttributes(metadata, stoneTypeById) {
+  return isAchala ? withAchalaAttributes(metadata, stoneTypeById) : withStoneTypeAttributes(metadata);
+}
 
 async function main() {
   let client;
   try {
+    if (input.problems.length) return fail(input.problems);
     if (!formFile && !metadataFile) {
       console.error(
         "❌ Give a form post or a metadata file:\n" +
-          "   node src/mint/mintUminaNFT.js --form json/sample-form-post.json [--out dir] [--force] [--dry-run | --images-only]\n" +
-          "   node src/mint/mintUminaNFT.js <metadata-file> [--out dir] [--force] [--dry-run | --images-only]",
+          "   node src/mint/mintNFT.js --form json/sample-umina-form-post.json [--token umina|achala] [--out dir] [--force] [--dry-run | --images-only]\n" +
+          "   node src/mint/mintNFT.js <metadata-file> [--token umina|achala] [--out dir] [--force] [--dry-run | --images-only]",
       );
       process.exitCode = 1;
       return;
     }
-    if (dryRun && imagesOnly) {
-      console.error("❌ Give --dry-run or --images-only, not both.");
-      process.exitCode = 1;
-      return;
-    }
+    const { name: className, envVar: tokenVar } = TOKEN_CLASSES[tokenClass];
+    const tokenId = process.env[tokenVar];
+
     // --- 1. Check the environment and the metadata ---
     // --images-only never leaves the machine, so it needs no credentials
-    const problems = imagesOnly ? [] : validateMintEnv(process.env);
+    const problems = imagesOnly ? [] : validateMintEnv(process.env, tokenClass);
     if (formFile) {
       // Simulated form post: generate the metadata file from it first
       const form = JSON.parse(fs.readFileSync(formFile, "utf8"));
-      const template = JSON.parse(fs.readFileSync("json/template.json", "utf8"));
+      const template = JSON.parse(fs.readFileSync(MINT_CLASSES[tokenClass].template, "utf8"));
       const generated = metadataFromForm(form, template, path.dirname(path.resolve(formFile)));
-      metadataFile = writeGeneratedMetadata(generated, outDir);
+      metadataFile = writeGeneratedMetadata(withStonesToken(generated), outDir);
       console.log(`✅ Metadata file generated from ${formFile}: ${metadataFile}`);
     }
-    const metadata = JSON.parse(fs.readFileSync(metadataFile, "utf8"));
+    const metadata = withStonesToken(JSON.parse(fs.readFileSync(metadataFile, "utf8")));
+    if (isAchala) {
+      // The stones are named by stone_id and serial, all in the Umiña token
+      if (!process.env.UMINA_TOKEN_ID) {
+        if (imagesOnly) problems.push("UMINA_TOKEN_ID is missing; it fills properties.umina_token_id");
+      } else {
+        const tokenProblem = uminaTokenProblem(metadata.properties ?? {}, process.env.UMINA_TOKEN_ID);
+        if (tokenProblem) problems.push(tokenProblem);
+      }
+    }
     const baseDir = path.dirname(path.resolve(metadataFile));
     const { images, problems: imageProblems } = collectImages(metadata, baseDir);
     problems.push(...imageProblems);
@@ -127,7 +168,7 @@ async function main() {
     const samplesProblem = samplesFolderProblem(uploads, path.resolve("samples"));
     if (samplesProblem) problems.push(samplesProblem);
     else missingAssets(uploads).forEach((a) => problems.push(`file not found: ${a.file}`));
-    const idProblem = checkStoneId(metadata.properties?.stone_id);
+    const idProblem = checkStoneId(metadata.properties?.stone_id, tokenClass);
     if (idProblem) problems.push(idProblem);
 
     // Check each photo from its header (type, size, pixels) and plan its
@@ -142,19 +183,17 @@ async function main() {
     }
     if (!problems.length) {
       // The files have no CIDs yet, so check the schema with placeholder URIs
-      const { valid, errors } = validateMetadata(buildMetadata(metadata, images, undefined, documents));
+      const { valid, errors } = validateMetadata(
+        buildMetadata(metadata, images, undefined, documents),
+        tokenClass,
+      );
       if (!valid) {
         errors.forEach((e) =>
           problems.push(`${metadataFile} failed validation: ${e.instancePath || "/"} ${e.message}`),
         );
       }
     }
-    if (problems.length) {
-      console.error("❌ Problems found:");
-      problems.forEach((p) => console.error(`   - ${p}`));
-      process.exitCode = 1;
-      return;
-    }
+    if (problems.length) return fail(problems);
     const stoneId = metadata.properties.stone_id;
     console.log(`✅ ${imagesOnly ? "Metadata" : "Environment and metadata"} for ${stoneId} are valid.`);
 
@@ -180,18 +219,18 @@ async function main() {
 
     if (imagesOnly) {
       assets.forEach((a) => console.log(`Would pin ${a.file} (${a.mime})`));
-      const preview = buildMetadata(withStoneTypeAttributes(metadata), images, undefined, documents);
+      const preview = buildMetadata(withGeneratedAttributes(metadata), images, undefined, documents);
       console.log("Would pin this metadata (CIDs pending):");
       console.log(JSON.stringify(preview, null, 2));
       const show = (name) => process.env[name] || "not set";
       console.log(
-        `Would record COMPLIANCE, mint under ${show("UMINA_TOKEN_ID")} and record MINT in ${show("HCS_TOPIC_ID")}.`,
+        `Would record COMPLIANCE, mint under ${show(tokenVar)} and record MINT in ${show("HCS_TOPIC_ID")}.`,
       );
       console.log("Images only: nothing pinned, minted or recorded.");
       return;
     }
 
-    // --- 2. Check the HCS topic: it exists, and the stone is not minted yet ---
+    // --- 2. Check the HCS topic: it exists, and the item is not minted yet ---
     let events;
     try {
       events = await topicEvents(process.env.HCS_TOPIC_ID);
@@ -210,6 +249,28 @@ async function main() {
     }
     if (earlier) console.log(`⚠️  ${stoneId} is already minted; minting again (--force).`);
 
+    // --- 2b. An Achala: check each of its Umiña stones on the ledger ---
+    const stones = isAchala ? metadata.properties.stones : [];
+    let stoneTypeById;
+    if (isAchala) {
+      const nfts = [];
+      try {
+        for (const s of stones) nfts.push(await nftInfo(process.env.UMINA_TOKEN_ID, s.serial));
+      } catch (err) {
+        console.error(`❌ Cannot check the stones on the mirror node: ${err.message}`);
+        process.exitCode = 1;
+        return;
+      }
+      const stoneProblems = stoneLedgerProblems(stones, nfts, events, {
+        uminaTokenId: process.env.UMINA_TOKEN_ID,
+        achalaTokenId: tokenId,
+        treasuryId: process.env.TREASURY_ID,
+      });
+      if (stoneProblems.length) return fail(stoneProblems);
+      stoneTypeById = stoneTypesFromEvents(events, stones);
+      console.log(`✅ Stones checked: ${stones.map((s) => s.stone_id).join(", ")}`);
+    }
+
     // --- 3. Connect to Hedera testnet ---
     const operatorId = process.env.OPERATOR_ID;
     const supplyKey = parseEcdsaKey(process.env.SUPPLY_KEY);
@@ -223,21 +284,19 @@ async function main() {
     // point to a message that already exists: post it first (#14). If this
     // fails, nothing has been pinned or minted.
     try {
+      const { properties } = metadata;
+      const fields = isAchala
+        ? achalaComplianceFields(properties)
+        : {
+            stone_type: properties.stone_type,
+            vendor_ruc: properties.vendor_ruc,
+            mining_concession: properties.mining_concession,
+            reinfo_id: properties.reinfo_id,
+            hs_code: properties.hs_code,
+          };
       const compliance = buildEvent(
-        {
-          event: "COMPLIANCE",
-          stoneId,
-          tokenId: process.env.UMINA_TOKEN_ID,
-          serials: [],
-          actorId: operatorId,
-        },
-        {
-          stone_type: metadata.properties.stone_type,
-          vendor_ruc: metadata.properties.vendor_ruc,
-          mining_concession: metadata.properties.mining_concession,
-          reinfo_id: metadata.properties.reinfo_id,
-          hs_code: metadata.properties.hs_code,
-        },
+        { event: "COMPLIANCE", stoneId, tokenId, serials: [], actorId: operatorId },
+        fields,
       );
       const complianceTxId = await submitEvent(
         client,
@@ -269,16 +328,16 @@ async function main() {
         pinnedCids.push(fileCid);
         console.log(`✅ Pinned ${path.basename(item.file)}: ipfs://${fileCid}`);
       }
-      // Stone Type, Materials and Form come from the list, not from the form
-      const pinned = buildMetadata(withStoneTypeAttributes(metadata), images, cidsByFile, documents);
+      // The attributes come from the data, not from the form
+      const pinned = buildMetadata(withGeneratedAttributes(metadata, stoneTypeById), images, cidsByFile, documents);
       cid = await pinJson(pinned, stoneId, process.env.PINATA_JWT);
       pinnedCids.push(cid);
       ipfsUri = `ipfs://${cid}`;
       console.log(`✅ Metadata pinned to IPFS: ${ipfsUri}`);
 
-      // Mint NFT under existing Umiña Token ID (supply key signs)
+      // Mint under the class's token (supply key signs)
       const mintTx = await new TokenMintTransaction()
-        .setTokenId(process.env.UMINA_TOKEN_ID)
+        .setTokenId(tokenId)
         .setMetadata([Buffer.from(ipfsUri)])
         .freezeWith(client)
         .sign(supplyKey);
@@ -286,7 +345,7 @@ async function main() {
       const mintReceipt = await mintResponse.getReceipt(client);
       serials = mintReceipt.serials.map(String);
       mintTxId = mintResponse.transactionId.toString();
-      console.log(`✅ Minted Umiña NFT serials: ${serials} (${mintTxId})`);
+      console.log(`✅ Minted ${className} NFT serials: ${serials} (${mintTxId})`);
     } catch (err) {
       console.error(`❌ Nothing was minted for ${stoneId}:`, err);
       if (pinnedCids.length) {
@@ -307,15 +366,8 @@ async function main() {
     let hcsTxId;
     try {
       const message = buildEvent(
-        {
-          event: "MINT",
-          stoneId,
-          tokenId: process.env.UMINA_TOKEN_ID,
-          serials,
-          actorId: operatorId,
-          ref: mintTxId,
-        },
-        { ipfs_cid: cid },
+        { event: "MINT", stoneId, tokenId, serials, actorId: operatorId, ref: mintTxId },
+        { ipfs_cid: cid, ...(isAchala && { from_stone_ids: stones.map((s) => s.stone_id) }) },
       );
       hcsTxId = await submitEvent(
         client,
@@ -328,8 +380,40 @@ async function main() {
         `❌ Minted serials ${serials} (${ipfsUri}) but the HCS notarization failed:`,
         err,
       );
+      if (isAchala) {
+        console.error(`   No TRANSFORMATION was recorded either, for ${stones.map((s) => s.stone_id).join(", ")}.`);
+      }
       process.exitCode = 1;
       return;
+    }
+
+    // --- 5b. An Achala: each stone gets a TRANSFORMATION event naming it ---
+    for (const [i, stone] of stones.entries()) {
+      try {
+        const [envelope, fields] = mountedEvent(stone, {
+          uminaTokenId: process.env.UMINA_TOKEN_ID,
+          achalaId: stoneId,
+          achalaTokenId: tokenId,
+          achalaSerial: serials[0],
+          actorId: operatorId,
+          mintTxId,
+        });
+        const txId = await submitEvent(
+          client,
+          process.env.HCS_TOPIC_ID,
+          buildEvent(envelope, fields),
+          loadSubmitKey(process.env),
+        );
+        console.log(`✅ TRANSFORMATION recorded for ${stone.stone_id}: ${txId}`);
+      } catch (err) {
+        const missing = stones.slice(i).map((s) => s.stone_id).join(", ");
+        console.error(
+          `❌ Minted ${stoneId} (serial ${serials}) and recorded MINT, but TRANSFORMATION failed; still to record for: ${missing}`,
+          err,
+        );
+        process.exitCode = 1;
+        return;
+      }
     }
 
     // --- 6. Provenance logging ---

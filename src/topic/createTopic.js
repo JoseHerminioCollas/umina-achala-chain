@@ -1,5 +1,5 @@
 /**
- * @file createUminaTopic.js
+ * @file createTopic.js
  * @description Creates an Umiña Achala HCS topic on Hedera TESTNET: the
  * provenance topic (HCS_TOPIC_ID) or the display topic (HCS_DISPLAY_TOPIC_ID),
  * with a submit key so only the project can post events, an admin key so the
@@ -7,7 +7,7 @@
  * (umina-achala-chain#9).
  *
  * Run from the command line:
- * node src/topic/createUminaTopic.js <provenance|display> [env-file] [--force] [--dry-run]
+ * node src/topic/createTopic.js <provenance|display> [env-file] [--force] [--dry-run]
  *
  * The env file defaults to .env.testnet. The topic kind is required, so a
  * topic is never created without saying which. --dry-run checks the

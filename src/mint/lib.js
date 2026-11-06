@@ -1,29 +1,84 @@
 /**
  * @file mint/lib.js
- * @description Environment checks, stone_id check and the Pinata pin used by
- * mintUminaNFT.js, kept apart from it so they can be tested without a network.
+ * @description Command line, environment checks, stone_id check and the
+ * Pinata pin used by mintNFT.js, kept apart from it so they can be tested
+ * without a network.
  */
 
 import fs from "fs";
 import path from "path";
+import { parseArgs } from "util";
 import { parseEcdsaKey } from "../keys.js";
 import { submitKeyProblem } from "../hcs.js";
 import { MAX_OTHER_IMAGES } from "./images.js";
+import { TOKEN_CLASSES, tokenClassProblem } from "../token/lib.js";
 
 const HEDERA_ID = /^0\.0\.\d+$/;
 // UMINA-YYYY-XX-NN, for example UMINA-2026-CH-03 (CH = chrysocolla)
 export const STONE_ID = /^UMINA-\d{4}-[A-Z]{2}-\d{2,}$/;
+// ACHALA-YYYY-XX-NN, for example ACHALA-2026-RI-01 (RI = ring)
+const ACHALA_ID = /^ACHALA-\d{4}-[A-Z]{2}-\d{2,}$/;
+
+/** What differs between minting an Umiña and an Achala. */
+export const MINT_CLASSES = {
+  umina: { template: "json/umina-template.json", idPattern: STONE_ID, idExample: "UMINA-2026-CH-03" },
+  achala: { template: "json/achala-template.json", idPattern: ACHALA_ID, idExample: "ACHALA-2026-RI-01" },
+};
+
+const MINT_OPTIONS = {
+  form: { type: "string" },
+  out: { type: "string" },
+  token: { type: "string" },
+  force: { type: "boolean" },
+  "dry-run": { type: "boolean" },
+  "images-only": { type: "boolean" },
+};
+
+/**
+ * Parses the command line of mintNFT.js:
+ * [metadata-file | --form post-file] [--token umina|achala] [--out dir]
+ * [--force] [--dry-run | --images-only]. Returns the input and a list of
+ * problems; usable only when it is empty.
+ */
+export function parseMintArgs(argv) {
+  let values, positionals;
+  try {
+    ({ values, positionals } = parseArgs({ args: argv, options: MINT_OPTIONS, allowPositionals: true }));
+  } catch (err) {
+    return { problems: [err.message] };
+  }
+  const input = {
+    metadataFile: positionals[0],
+    formFile: values.form,
+    outDir: values.out ?? "generated",
+    tokenClass: values.token ?? "umina",
+    force: Boolean(values.force),
+    dryRun: Boolean(values["dry-run"]),
+    imagesOnly: Boolean(values["images-only"]),
+  };
+  const problems = [];
+  if (positionals.length > 1) problems.push(`give one metadata file, got ${positionals.join(", ")}`);
+  if (input.formFile && input.metadataFile) problems.push("give a metadata file or --form, not both");
+  if (input.dryRun && input.imagesOnly) problems.push("give --dry-run or --images-only, not both");
+  const tokenProblem = tokenClassProblem(input.tokenClass);
+  if (tokenProblem) problems.push(tokenProblem);
+  return { ...input, problems };
+}
 export const PINATA_PIN_JSON = "https://api.pinata.cloud/pinning/pinJSONToIPFS";
 export const PINATA_PIN_FILE = "https://api.pinata.cloud/pinning/pinFileToIPFS";
 
 /**
- * Checks the environment and returns the problems found, each naming the
- * variable that is wrong. An empty array means the environment is usable.
+ * Checks the environment for minting a token class and returns the problems
+ * found, each naming the variable that is wrong. An empty array means the
+ * environment is usable. An Achala also needs UMINA_TOKEN_ID and TREASURY_ID,
+ * to check its stones.
  */
-export function validateMintEnv(env) {
+export function validateMintEnv(env, tokenClass = "umina") {
   const problems = [];
+  const ids = ["OPERATOR_ID", TOKEN_CLASSES[tokenClass].envVar, "HCS_TOPIC_ID"];
+  if (tokenClass === "achala") ids.push("UMINA_TOKEN_ID", "TREASURY_ID");
 
-  for (const name of ["OPERATOR_ID", "UMINA_TOKEN_ID", "HCS_TOPIC_ID"]) {
+  for (const name of ids) {
     if (!env[name]) problems.push(`${name} is missing`);
     else if (!HEDERA_ID.test(env[name]))
       problems.push(`${name} must look like 0.0.1234, got "${env[name]}"`);
@@ -57,11 +112,17 @@ export function findMint(events, stoneId) {
   return events.find(({ event }) => event.event === "MINT" && event.stone_id === stoneId);
 }
 
-/** Returns a problem message when the stone_id does not follow the scheme. */
-export function checkStoneId(stoneId) {
-  return STONE_ID.test(stoneId ?? "")
-    ? null
-    : `properties.stone_id must look like UMINA-2026-CH-03, got "${stoneId}"`;
+/**
+ * Returns a problem message when the stone_id does not follow the scheme of
+ * the token class, so Achala metadata is never minted as an Umiña or the
+ * other way round.
+ */
+export function checkStoneId(stoneId, tokenClass = "umina") {
+  const { idPattern, idExample } = MINT_CLASSES[tokenClass];
+  if (idPattern.test(stoneId ?? "")) return null;
+  const other = Object.keys(MINT_CLASSES).find((c) => MINT_CLASSES[c].idPattern.test(stoneId ?? ""));
+  const hint = other ? ` (an ${TOKEN_CLASSES[other].name} ID: give --token ${other})` : "";
+  return `properties.stone_id must look like ${idExample}, got "${stoneId}"${hint}`;
 }
 
 /** Pins a JSON document to IPFS through Pinata and returns its CID. */
@@ -235,14 +296,19 @@ export function buildMetadata(metadata, images, cidsByFile = new Map(), document
 }
 
 /**
- * For checking a template that has no images yet: drops `images` and
- * `documents` and fills
- * `image` and `files` with placeholders when they are absent.
+ * For checking a metadata file before anything is pinned: drops the
+ * input-only `main_image`, `images` and `documents`, and fills `image` and
+ * `files` with placeholders when they are absent. Each document of a
+ * supported type becomes a placeholder file of that type, as buildMetadata
+ * makes it, so checks that need a document (an invoice for a metal) see it.
  */
 export function withPlaceholderAssets(metadata) {
-  const { main_image: _main, images: _images, documents: _documents, ...rest } =
-    structuredClone(metadata);
-  return { ...rest, image: rest.image ?? "ipfs://pending", files: rest.files ?? [] };
+  const { main_image: _main, images: _images, documents, ...rest } = structuredClone(metadata);
+  const documentFiles = (Array.isArray(documents) ? documents : []).flatMap((doc) => {
+    const type = DOCUMENT_TYPES[path.extname(String(doc?.file ?? "")).toLowerCase()];
+    return type ? [{ uri: "ipfs://pending", type, metadata: { description: doc.description ?? "" } }] : [];
+  });
+  return { ...rest, image: rest.image ?? "ipfs://pending", files: rest.files ?? documentFiles };
 }
 
 /** Pins a file to IPFS through Pinata and returns its CID. */

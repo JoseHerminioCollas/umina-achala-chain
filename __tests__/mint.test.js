@@ -9,12 +9,15 @@ import {
   collectDocuments,
   collectImages,
   missingAssets,
+  parseMintArgs,
   pinFile,
   pinJson,
   samplesFolderProblem,
   validateMintEnv,
   withPlaceholderAssets,
 } from "../src/mint/lib.js";
+import { buildEvent, MAX_MESSAGE_BYTES } from "../src/hcs.js";
+import { mountedEvent, mountedStones, uminaTokenProblem, withUminaTokenId } from "../src/mint/achala.js";
 
 const key = PrivateKey.generateECDSA().toStringDer();
 
@@ -232,5 +235,102 @@ describe("pinFile", () => {
     await expect(pinFile(file, "stone-thumb", "image/jpg", "jwt", fetchFn)).rejects.toThrow(
       "Pinata file pin failed for stone-thumb: 413 TOO_LARGE",
     );
+  });
+});
+
+describe("parseMintArgs", () => {
+  test("reads the file, the options and the token class, umina by default", () => {
+    expect(parseMintArgs(["m.json"])).toMatchObject({
+      metadataFile: "m.json",
+      outDir: "generated",
+      tokenClass: "umina",
+      force: false,
+      dryRun: false,
+      imagesOnly: false,
+      problems: [],
+    });
+    expect(parseMintArgs(["--form", "p.json", "--token=achala", "--out", "o", "--force"])).toMatchObject({
+      formFile: "p.json",
+      tokenClass: "achala",
+      outDir: "o",
+      force: true,
+      problems: [],
+    });
+  });
+
+  test("lists what is wrong with the command line", () => {
+    expect(parseMintArgs(["a.json", "b.json"]).problems).toEqual(["give one metadata file, got a.json, b.json"]);
+    expect(parseMintArgs(["a.json", "--form", "p.json"]).problems).toEqual(["give a metadata file or --form, not both"]);
+    expect(parseMintArgs(["a.json", "--token", "__proto__"]).problems).toEqual([
+      '--token must be umina or achala, got "__proto__"',
+    ]);
+    expect(parseMintArgs(["a.json", "--token"]).problems[0]).toContain("argument missing");
+  });
+});
+
+describe("minting an Achala (umina-achala-chain#16)", () => {
+  test("validateMintEnv needs the Achala token, and the Umiña token and treasury to check its stones", () => {
+    expect(validateMintEnv(makeEnv(), "achala")).toEqual(["ACHALA_TOKEN_ID is missing", "TREASURY_ID is missing"]);
+    expect(
+      validateMintEnv(makeEnv({ UMINA_TOKEN_ID: undefined, ACHALA_TOKEN_ID: "0.0.4004", TREASURY_ID: "0.0.1001" }), "achala"),
+    ).toEqual(["UMINA_TOKEN_ID is missing"]);
+  });
+
+  test("checkStoneId follows the class and names the other one", () => {
+    expect(checkStoneId("ACHALA-2026-RI-01", "achala")).toBeNull();
+    expect(checkStoneId("ACHALA-2026-RI-01")).toContain("give --token achala");
+    expect(checkStoneId("UMINA-2026-CH-03", "achala")).toContain("give --token umina");
+    expect(checkStoneId("RING-1", "achala")).toBe('properties.stone_id must look like ACHALA-2026-RI-01, got "RING-1"');
+  });
+
+  test("withUminaTokenId sets umina_token_id only when it is absent", () => {
+    const stones = [{ serial: 1, stone_id: "A" }];
+    expect(withUminaTokenId({ properties: { stones } }, "0.0.2002").properties).toEqual({ stones, umina_token_id: "0.0.2002" });
+    const typed = { properties: { stones, umina_token_id: "0.0.7" } };
+    expect(withUminaTokenId(typed, "0.0.2002")).toBe(typed);
+  });
+
+  test("uminaTokenProblem refuses a token other than UMINA_TOKEN_ID", () => {
+    expect(uminaTokenProblem({ umina_token_id: "0.0.2002" }, "0.0.2002")).toBeNull();
+    expect(uminaTokenProblem({ umina_token_id: "0.0.7" }, "0.0.2002")).toBe(
+      "properties.umina_token_id 0.0.7 is not the Umiña token 0.0.2002 (UMINA_TOKEN_ID)",
+    );
+  });
+
+  test("mountedStones ignores other tokens and Achalas that were burned", () => {
+    const mounted = (serial, id, token = "0.0.4004") => ({
+      event: { event: "TRANSFORMATION", kind: "mounted", from_stone_ids: [id], to_token_id: token, to_serial: serial },
+    });
+    const events = [
+      mounted("1", "UMINA-2026-CH-01"),
+      mounted("2", "UMINA-2026-CH-02"),
+      mounted("3", "UMINA-2026-CH-03", "0.0.9999"),
+      { event: { event: "BURN", token_id: "0.0.4004", serials: ["2"] } },
+    ];
+    expect([...mountedStones(events, "0.0.4004").keys()]).toEqual(["UMINA-2026-CH-01"]);
+  });
+
+  test("the largest MINT (10 stones) and a TRANSFORMATION fit in one HCS message", () => {
+    const ids = Array.from({ length: 10 }, (_, i) => `UMINA-2026-CH-${String(i).padStart(4, "0")}`);
+    const envelope = {
+      event: "MINT",
+      stoneId: "ACHALA-2026-RI-0001",
+      tokenId: "0.0.12345678",
+      serials: ["123456"],
+      actorId: "0.0.12345678",
+      ref: "0.0.12345678@1700000000.123456789",
+    };
+    const message = buildEvent(envelope, { ipfs_cid: "bafkrei" + "a".repeat(52), from_stone_ids: ids });
+    expect(Buffer.byteLength(JSON.stringify(message))).toBeLessThan(MAX_MESSAGE_BYTES);
+    const stone = { serial: 123456, stone_id: ids[0] };
+    const [env, fields] = mountedEvent(stone, {
+      uminaTokenId: "0.0.12345678",
+      achalaId: envelope.stoneId,
+      achalaTokenId: "0.0.12345678",
+      achalaSerial: "123456",
+      actorId: "0.0.12345678",
+      mintTxId: envelope.ref,
+    });
+    expect(() => buildEvent(env, fields)).not.toThrow();
   });
 });

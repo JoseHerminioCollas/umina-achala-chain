@@ -1,0 +1,117 @@
+{
+  "title": "Achala Jewelry HIP-412 Metadata",
+  "description": "An Achala is a piece of jewelry made of one or more Umiña NFTs (umina-achala-chain#16). The Umiña NFTs stay in the UA treasury, associated with the Achala by the MINT and TRANSFORMATION events. A gold nugget is a stone, so it can be an Umiña; the gold or silver of a piece comes from one of its Umiña stones or from an invoice in documents.",
+  "type": "object",
+  "required": ["name", "creator", "description", "image", "format", "metadata_version", "properties", "files", "attributes"],
+  "properties": {
+    "name": { "type": "string" },
+    "creator": { "type": "string" },
+    "description": { "type": "string" },
+    "image": { "type": "string", "pattern": "^ipfs://.*" },
+    "type": { "type": "string" },
+    "format": { "type": "string", "enum": ["HIP412@2.0.0"] },
+    "metadata_version": { "type": "string" },
+
+    "properties": {
+      "type": "object",
+      "required": ["stone_id", "piece_type", "umina_token_id", "stones", "technique", "artisan_rna", "hs_code", "jurisdiction", "legal_uri", "vendor_ruc"],
+      "properties": {
+        "stone_id": {
+          "type": "string",
+          "pattern": "^ACHALA-\\d{4}-[A-Z]{2}-\\d{2,}$",
+          "description": "The item ID, ACHALA-YYYY-XX-NN, for example ACHALA-2026-RI-01 (XX: the piece type, e.g. RI ring). Named stone_id like the Umiña one, since the HCS events key every item by stone_id."
+        },
+        "piece_type": { "type": "string", "enum": ["ring", "pendant", "necklace", "earrings", "bracelet", "brooch"] },
+        "umina_token_id": {
+          "type": "string",
+          "pattern": "^0\\.0\\.\\d+$",
+          "description": "The Umiña token the stones are in (every stone is in the same token). The mint script fills it from UMINA_TOKEN_ID and refuses any other value."
+        },
+        "stones": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 10,
+          "description": "The Umiña NFTs the piece is made of, at least one, each by its serial in umina_token_id and its stone_id. The mint script checks each one exists, is held by the treasury, matches its MINT event and is not already in another Achala.",
+          "items": {
+            "type": "object",
+            "required": ["serial", "stone_id"],
+            "additionalProperties": false,
+            "properties": {
+              "serial": { "type": "integer", "minimum": 1 },
+              "stone_id": { "type": "string", "pattern": "^UMINA-\\d{4}-[A-Z]{2}-\\d{2,}$" }
+            }
+          }
+        },
+        "metals": {
+          "type": "array",
+          "description": "The metal of the piece. Each stone_type is a metal from schema/stone-types.json. source umina: the metal is one of the piece's Umiña stones (e.g. a UA gold nugget), named by stone_id; source invoice: the refiner's or seller's invoice is in documents.",
+          "items": {
+            "type": "object",
+            "required": ["stone_type", "fineness", "weight_g", "source"],
+            "additionalProperties": false,
+            "properties": {
+              "stone_type": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+              "fineness": { "type": "string", "description": "e.g. 18k, 950" },
+              "weight_g": { "type": "number", "exclusiveMinimum": 0 },
+              "source": { "type": "string", "enum": ["umina", "invoice"] },
+              "stone_id": { "type": "string", "pattern": "^UMINA-\\d{4}-[A-Z]{2}-\\d{2,}$" }
+            }
+          }
+        },
+        "technique": { "type": "string", "description": "e.g. wire wrapping, bezel setting" },
+        "artisan_rna": { "type": "string", "description": "Registro Nacional del Artesano of the artisan who made the piece" },
+        "hs_code": {
+          "type": "string",
+          "description": "Jewelry of precious metal 7113.19, of stones 7116.20 (to confirm, umina-achala-documents#1)"
+        },
+        "jurisdiction": { "type": "string" },
+        "legal_uri": { "type": "string", "format": "uri" },
+        "vendor_ruc": {
+          "type": "string",
+          "pattern": "^(10|15|17|20)\\d{9}$",
+          "description": "11-digit SUNAT RUC of the seller of the piece; metadataValidator.js also checks its check digit"
+        },
+        "compliance_proof_hcs": { "type": "string", "description": "Transaction ID of the COMPLIANCE event posted before the metadata was pinned (set by the mint script)" },
+        "hcs_compliance_topic": { "type": "string" },
+        "audit_log_uri": { "type": "string" },
+        "export_status": {
+          "type": "object",
+          "required": ["is_exported", "export_permit_id"],
+          "additionalProperties": false,
+          "properties": {
+            "is_exported": { "type": "boolean" },
+            "export_timestamp": { "type": ["string", "null"], "format": "date-time" },
+            "export_permit_id": { "type": "string" }
+          }
+        }
+      }
+    },
+
+    "files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["uri", "type"],
+        "properties": {
+          "uri": { "type": "string", "pattern": "^ipfs://.*" },
+          "type": { "type": "string" },
+          "is_default_file": { "type": "boolean" },
+          "checksum": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+          "metadata": { "type": "object" }
+        }
+      }
+    },
+
+    "attributes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["trait_type", "value"],
+        "properties": {
+          "trait_type": { "type": "string" },
+          "value": { "type": ["string", "number", "boolean"] }
+        }
+      }
+    }
+  }
+}

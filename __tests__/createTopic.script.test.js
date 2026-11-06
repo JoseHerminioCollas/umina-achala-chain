@@ -1,7 +1,7 @@
 import { jest } from "@jest/globals";
 import { PrivateKey } from "@hashgraph/sdk";
 
-// Runs src/topic/createUminaTopic.js itself (it calls main() on import) with
+// Runs src/topic/createTopic.js itself (it calls main() on import) with
 // dotenv, the Hedera client, the transaction and the mirror node mocked.
 
 const operatorKey = PrivateKey.generateECDSA();
@@ -56,12 +56,12 @@ function mockDependencies({ executeError, mirrorStatus = 404, mirrorBody = {} } 
 }
 
 async function runScript(...args) {
-  process.argv = ["node", "src/topic/createUminaTopic.js", ...args];
-  await import("../src/topic/createUminaTopic.js");
+  process.argv = ["node", "src/topic/createTopic.js", ...args];
+  await import("../src/topic/createTopic.js");
   await new Promise((resolve) => setImmediate(resolve));
 }
 
-describe("createUminaTopic.js", () => {
+describe("createTopic.js", () => {
   const env = { ...process.env };
   const argv = [...process.argv];
   const fetchBefore = global.fetch;

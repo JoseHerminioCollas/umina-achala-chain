@@ -1,7 +1,7 @@
 /**
  * @file token/lib.js
  * @description Environment checks and the TokenCreateTransaction for the
- * Umiña NFT class, used by createUminaToken.js and kept apart from it so they
+ * Umiña and Achala NFT classes, used by createToken.js and kept apart from it so they
  * can be tested without a network.
  */
 
@@ -17,25 +17,64 @@ import { parseEcdsaKey } from "../keys.js";
 import { parseArgs } from "util";
 import { submitKeyProblem } from "../hcs.js";
 
-export const TOKEN_NAME = "Umiña";
-export const TOKEN_SYMBOL = "UMINA";
-export const TOKEN_MEMO = "Umiña Achala: Authentic Peruvian Stones and Minerals";
-
 /**
  * The token classes UA creates (umina-achala-chain#15): Umiña for stones and
- * Achala for jewelry set with Umiña stones. Both share every other setting
+ * Achala for jewelry made of Umiña stones. Both share every other setting
  * (keys, no metadata key, royalty and fallback fee, infinite supply); each
  * has its own name, symbol, memo and env variable for its ID.
  */
 export const TOKEN_CLASSES = {
-  umina: { name: TOKEN_NAME, symbol: TOKEN_SYMBOL, memo: TOKEN_MEMO, envVar: "UMINA_TOKEN_ID" },
+  umina: {
+    name: "Umiña",
+    symbol: "UMINA",
+    memo: "Umiña: Peruvian stones",
+    envVar: "UMINA_TOKEN_ID",
+  },
   achala: {
     name: "Achala",
     symbol: "ACHALA",
-    memo: "Umiña Achala: Peruvian Jewelry Set with Certified Umiña Stones",
+    memo: "Achala: Peruvian jewelry made of Umiña stones",
     envVar: "ACHALA_TOKEN_ID",
   },
 };
+
+/**
+ * The problem with a --token value, or undefined when it names a class. Only
+ * the object's own keys count, so "constructor" or "__proto__" are refused.
+ */
+export function tokenClassProblem(value) {
+  if (Object.hasOwn(TOKEN_CLASSES, value)) return undefined;
+  return `--token must be ${Object.keys(TOKEN_CLASSES).join(" or ")}, got "${value}"`;
+}
+
+/**
+ * Parses and checks the command line of createToken.js:
+ * [env-file] [--token umina|achala] [--dry-run], also --token=achala.
+ * Returns the input and a list of problems; usable only when it is empty.
+ */
+export function parseCreateArgs(argv) {
+  let values, positionals;
+  try {
+    ({ values, positionals } = parseArgs({
+      args: argv,
+      options: { "dry-run": { type: "boolean" }, token: { type: "string" } },
+      allowPositionals: true,
+    }));
+  } catch (err) {
+    return { problems: [err.message] };
+  }
+  const input = {
+    envFile: positionals[0] ?? ".env.testnet",
+    tokenClass: values.token ?? "umina",
+    dryRun: Boolean(values["dry-run"]),
+  };
+  const problems = [];
+  if (positionals.length > 1) problems.push(`give at most one env file, got ${positionals.join(", ")}`);
+  const tokenProblem = tokenClassProblem(input.tokenClass);
+  if (tokenProblem) problems.push(tokenProblem);
+  return { ...input, problems };
+}
+
 export const ROYALTY = { numerator: 5, denominator: 100 };
 
 const ACCOUNT_ID = /^0\.0\.\d+$/;
@@ -221,12 +260,8 @@ export function parseAdminArgs(argv) {
     dryRun: Boolean(values["dry-run"]),
     tokenClass: values.token ?? "umina",
   };
-  if (!TOKEN_CLASSES[input.tokenClass]) {
-    return {
-      ...input,
-      problems: [`--token must be ${Object.keys(TOKEN_CLASSES).join(" or ")}, got "${input.tokenClass}"`],
-    };
-  }
+  const tokenProblem = tokenClassProblem(input.tokenClass);
+  if (tokenProblem) return { ...input, problems: [tokenProblem] };
   if (!ADMIN_COMMANDS[command]) {
     return { ...input, problems: [`give the command: ${Object.keys(ADMIN_COMMANDS).join(", ")}`] };
   }

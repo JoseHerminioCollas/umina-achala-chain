@@ -4,7 +4,7 @@ import os from "os";
 import path from "path";
 import { PrivateKey } from "@hashgraph/sdk";
 
-// Runs src/mint/mintUminaNFT.js itself (it calls main() on import) with Hedera,
+// Runs src/mint/mintNFT.js itself (it calls main() on import) with Hedera,
 // Pinata (fetch) and dotenv mocked, and records what it sends.
 
 const key = PrivateKey.generateECDSA().toStringDer();
@@ -18,8 +18,11 @@ function mockDependencies({
   complianceError,
   mirrorStatus = 200,
   topicEvents = [],
+  nfts = {},
+  transformationError,
 } = {}) {
   calls.order = [];
+  calls.messages = [];
   calls.mirror = [];
   calls.mint = null;
   calls.signed = [];
@@ -64,6 +67,16 @@ function mockDependencies({
         freezeWith: jest.fn(() => tx),
         sign: jest.fn(async (k) => (calls.hcs.signed.push(k.publicKey.toString()), tx)),
         execute: jest.fn(async () => {
+          calls.messages.push(calls.hcs.message);
+          // An Achala's TRANSFORMATION events, after MINT
+          if (calls.hcs.message.event === "TRANSFORMATION") {
+            calls.order.push("transformation");
+            if (transformationError) throw transformationError;
+            return {
+              transactionId: { toString: () => "0.0.1@1700000000.2" },
+              getReceipt: async () => ({ status: "SUCCESS" }),
+            };
+          }
           // The COMPLIANCE event before pinning is recorded apart from MINT,
           // and the hcs errors apply to MINT only
           if (calls.hcs.message.event === "COMPLIANCE") {
@@ -91,6 +104,19 @@ function mockDependencies({
   }));
 
   global.fetch = jest.fn(async (url, init) => {
+    // An NFT's state: nfts["<token>/<serial>"], by default held by the treasury
+    const nft = /\/api\/v1\/tokens\/([\d.]+)\/nfts\/(\d+)$/.exec(url);
+    if (nft) {
+      calls.mirror.push(url);
+      const key = `${nft[1]}/${nft[2]}`;
+      const info = key in nfts ? nfts[key] : { account_id: "0.0.1001", deleted: false };
+      return {
+        ok: info !== null,
+        status: info === null ? 404 : 200,
+        text: async () => "not found",
+        json: async () => info,
+      };
+    }
     if (url.startsWith("https://testnet.mirrornode.hedera.com/")) {
       // The HCS topic's messages, one page, base64-encoded as the mirror node does
       calls.mirror.push(url);
@@ -137,8 +163,8 @@ let outDir;
 
 async function runScript(...args) {
   const out = args.includes("--out") ? [] : ["--out", outDir];
-  process.argv = ["node", "src/mint/mintUminaNFT.js", ...args, ...out];
-  const { done } = await import("../src/mint/mintUminaNFT.js");
+  process.argv = ["node", "src/mint/mintNFT.js", ...args, ...out];
+  const { done } = await import("../src/mint/mintNFT.js");
   await done;
 }
 
@@ -149,7 +175,7 @@ let photo;
 
 // The first image name becomes main_image and the rest go in images.
 function writeMetadata(change = () => {}, imageNames = ["front.jpg", "back.jpg"], documentNames = []) {
-  const metadata = JSON.parse(fs.readFileSync("json/example.json", "utf8"));
+  const metadata = JSON.parse(fs.readFileSync("json/umina-example.json", "utf8"));
   // The example names its own photos in samples/; each test names its own
   delete metadata.main_image;
   delete metadata.images;
@@ -167,7 +193,7 @@ function writeMetadata(change = () => {}, imageNames = ["front.jpg", "back.jpg"]
   return file;
 }
 
-describe("mintUminaNFT.js", () => {
+describe("mintNFT.js", () => {
   const env = { ...process.env };
   const argv = [...process.argv];
   const fetchBefore = global.fetch;
@@ -551,7 +577,7 @@ describe("mintUminaNFT.js", () => {
     mockDependencies();
     await runScript(writeMetadata(), "--dry-run", "--images-only");
 
-    expect(console.error).toHaveBeenCalledWith("❌ Give --dry-run or --images-only, not both.");
+    expect(console.error).toHaveBeenCalledWith("   - give --dry-run or --images-only, not both");
     expect(process.exitCode).toBe(1);
   });
 
@@ -809,5 +835,270 @@ describe("mintUminaNFT.js", () => {
     expect(calls.order).toEqual([]);
     expect(calls.forTestnet).not.toHaveBeenCalled();
     expect(process.exitCode).toBe(1);
+  });
+
+  // --- Achala (umina-achala-chain#16) ---
+
+  // An Achala metadata file from json/achala-example.json, with its own photo
+  function writeAchala(change = () => {}, documentNames = []) {
+    return writeMetadata(
+      (m) => {
+        const achala = JSON.parse(fs.readFileSync("json/achala-example.json", "utf8"));
+        const { main_image, documents } = m;
+        for (const key of Object.keys(m)) delete m[key];
+        Object.assign(m, achala, { main_image }, documents && { documents });
+        delete m.images;
+        change(m);
+      },
+      ["front.jpg"],
+      documentNames,
+    );
+  }
+
+  // The provenance topic once both stones of the example are minted
+  const stoneEvents = [
+    { event: "COMPLIANCE", stone_id: "UMINA-2026-CH-03", token_id: "0.0.2002", serials: [], stone_type: "chrysocolla" },
+    { event: "MINT", stone_id: "UMINA-2026-CH-03", token_id: "0.0.2002", serials: ["3"] },
+    { event: "COMPLIANCE", stone_id: "UMINA-2026-AU-01", token_id: "0.0.2002", serials: [], stone_type: "gold" },
+    { event: "MINT", stone_id: "UMINA-2026-AU-01", token_id: "0.0.2002", serials: ["4"] },
+  ];
+
+  function achalaEnv() {
+    Object.assign(process.env, { ACHALA_TOKEN_ID: "0.0.4004", TREASURY_ID: "0.0.1001" });
+  }
+
+  test("--token achala checks the stones, mints under ACHALA_TOKEN_ID, records MINT and a TRANSFORMATION per stone", async () => {
+    achalaEnv();
+    mockDependencies({ topicEvents: stoneEvents });
+    await runScript(writeAchala(), "--token", "achala");
+
+    expect(calls.mirror).toEqual(
+      expect.arrayContaining([
+        "https://testnet.mirrornode.hedera.com/api/v1/tokens/0.0.2002/nfts/3",
+        "https://testnet.mirrornode.hedera.com/api/v1/tokens/0.0.2002/nfts/4",
+      ]),
+    );
+    expect(calls.order).toEqual(["compliance", "pinFile", "pinFile", "pin", "mint", "hcs", "transformation", "transformation"]);
+    expect(calls.mint.tokenId).toBe("0.0.4004");
+
+    const [compliance, mint, ...mounted] = calls.messages;
+    expect(compliance).toMatchObject({
+      event: "COMPLIANCE",
+      stone_id: "ACHALA-2026-RI-01",
+      token_id: "0.0.4004",
+      piece_type: "ring",
+      artisan_rna: "RNA-112233",
+      from_stone_ids: ["UMINA-2026-CH-03", "UMINA-2026-AU-01"],
+    });
+    expect(mint).toMatchObject({
+      event: "MINT",
+      stone_id: "ACHALA-2026-RI-01",
+      token_id: "0.0.4004",
+      serials: ["7"],
+      ipfs_cid: "QmMockCID12345",
+      from_stone_ids: ["UMINA-2026-CH-03", "UMINA-2026-AU-01"],
+    });
+    expect(mounted).toEqual([
+      expect.objectContaining({
+        event: "TRANSFORMATION",
+        stone_id: "UMINA-2026-CH-03",
+        token_id: "0.0.2002",
+        serials: ["3"],
+        ref: "0.0.1001@1700000000.0",
+        kind: "mounted",
+        from_stone_ids: ["UMINA-2026-CH-03"],
+        to_stone_id: "ACHALA-2026-RI-01",
+        to_token_id: "0.0.4004",
+        to_serial: "7",
+      }),
+      expect.objectContaining({ stone_id: "UMINA-2026-AU-01", serials: ["4"], to_serial: "7" }),
+    ]);
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  test("an Achala's attributes are written from its data, stone names from their COMPLIANCE events", async () => {
+    achalaEnv();
+    mockDependencies({ topicEvents: stoneEvents });
+    await runScript(writeAchala((m) => m.attributes.push({ trait_type: "Stones", value: "typed by hand" })), "--token", "achala");
+
+    expect(calls.pin.body.pinataContent.attributes).toEqual([
+      { trait_type: "Piece Type", value: "Ring" },
+      { trait_type: "Metal", value: "Gold 18k" },
+      { trait_type: "Stones", value: "Chrysocolla, Gold" },
+      { trait_type: "Artisan", value: "RNA-112233" },
+      { trait_type: "Ring Size", value: "7" },
+    ]);
+  });
+
+  test.each([
+    ["is held by someone else", { nfts: { "0.0.2002/3": { account_id: "0.0.5005", deleted: false } } }, "UMINA-2026-CH-03: 0.0.2002/3 is held by 0.0.5005, not the treasury 0.0.1001"],
+    ["is burned", { nfts: { "0.0.2002/3": { account_id: "0.0.1001", deleted: true } } }, "UMINA-2026-CH-03: 0.0.2002/3 is burned"],
+    ["does not exist", { nfts: { "0.0.2002/3": null } }, "UMINA-2026-CH-03: 0.0.2002/3 does not exist"],
+    ["has no MINT event with that serial", { topicEvents: stoneEvents.filter((e) => e.serials[0] !== "3") }, "UMINA-2026-CH-03: no MINT event for it with serial 0.0.2002/3"],
+    [
+      "is mounted in another Achala",
+      {
+        topicEvents: [
+          ...stoneEvents,
+          { event: "TRANSFORMATION", kind: "mounted", from_stone_ids: ["UMINA-2026-CH-03"], to_token_id: "0.0.4004", to_serial: "2", serials: ["3"] },
+        ],
+      },
+      "UMINA-2026-CH-03 is already mounted in Achala 0.0.4004/2 (TRANSFORMATION #5)",
+    ],
+  ])("refuses a stone that %s, and sends nothing", async (_, options, problem) => {
+    achalaEnv();
+    mockDependencies({ topicEvents: stoneEvents, ...options });
+    await runScript(writeAchala(), "--token", "achala", "--force");
+
+    expect(console.error).toHaveBeenCalledWith(`   - ${problem}`);
+    expect(calls.order).toEqual([]);
+    expect(process.exitCode).toBe(1);
+  });
+
+  test("a stone whose Achala was burned (taken apart) can be mounted again", async () => {
+    achalaEnv();
+    mockDependencies({
+      topicEvents: [
+        ...stoneEvents,
+        { event: "TRANSFORMATION", kind: "mounted", from_stone_ids: ["UMINA-2026-CH-03"], to_token_id: "0.0.4004", to_serial: "2", serials: ["3"] },
+        { event: "BURN", token_id: "0.0.4004", serials: ["2"], reason: "Piece disassembled" },
+      ],
+    });
+    await runScript(writeAchala(), "--token", "achala");
+
+    expect(calls.order).toContain("mint");
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  test("refuses stones from another token before reading the ledger", async () => {
+    achalaEnv();
+    mockDependencies({ topicEvents: stoneEvents });
+    await runScript(writeAchala((m) => (m.properties.umina_token_id = "0.0.9999")), "--token", "achala");
+
+    expect(console.error).toHaveBeenCalledWith(
+      "   - properties.umina_token_id 0.0.9999 is not the Umiña token 0.0.2002 (UMINA_TOKEN_ID)",
+    );
+    expect(calls.mirror).toEqual([]);
+    expect(calls.order).toEqual([]);
+    expect(process.exitCode).toBe(1);
+  });
+
+  test("a stone may not name its own token_id: the token is umina_token_id", async () => {
+    achalaEnv();
+    mockDependencies({ topicEvents: stoneEvents });
+    await runScript(writeAchala((m) => (m.properties.stones[0].token_id = "0.0.2002")), "--token", "achala", "--dry-run");
+
+    expect(console.error).toHaveBeenCalledWith(expect.stringContaining("must NOT have additional properties"));
+    expect(process.exitCode).toBe(1);
+  });
+
+  test.each([
+    ["no stones", (m) => (m.properties.stones = []), "must NOT have fewer than 1 items"],
+    ["a stone listed twice", (m) => m.properties.stones.push(m.properties.stones[0]), "lists serial 3 twice"],
+    ["a metal that is not a metal", (m) => (m.properties.metals[0].stone_type = "chrysocolla"), '"chrysocolla" is not a metal'],
+    ["a metal from an Umiña not in the piece", (m) => (m.properties.metals[0].stone_id = "UMINA-2026-AU-09"), "its stone_id must be one of properties.stones"],
+    ["a metal from an invoice with no document", (m) => (m.properties.metals[0].source = "invoice"), "add the invoice to documents"],
+  ])("rejects an Achala with %s before anything is sent", async (_, change, problem) => {
+    achalaEnv();
+    mockDependencies({ topicEvents: stoneEvents });
+    await runScript(writeAchala(change), "--token", "achala");
+
+    expect(console.error).toHaveBeenCalledWith(expect.stringContaining(problem));
+    expect(calls.order).toEqual([]);
+    expect(calls.mirror).toEqual([]);
+    expect(process.exitCode).toBe(1);
+  });
+
+  test("a metal from an invoice is fine with the invoice in documents", async () => {
+    achalaEnv();
+    mockDependencies({ topicEvents: stoneEvents });
+    await runScript(writeAchala((m) => (m.properties.metals[0].source = "invoice"), ["invoice.pdf"]), "--token", "achala", "--dry-run");
+
+    expect(log).toHaveBeenCalledWith("Dry run, nothing sent.");
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  test("refuses Achala metadata minted as an Umiña, and the other way round, naming --token", async () => {
+    mockDependencies();
+    await runScript(writeAchala(), "--dry-run");
+    expect(console.error).toHaveBeenCalledWith(
+      '   - properties.stone_id must look like UMINA-2026-CH-03, got "ACHALA-2026-RI-01" (an Achala ID: give --token achala)',
+    );
+
+    jest.resetModules();
+    achalaEnv();
+    mockDependencies();
+    await runScript(writeMetadata(), "--token=achala", "--dry-run");
+    expect(console.error).toHaveBeenCalledWith(
+      '   - properties.stone_id must look like ACHALA-2026-RI-01, got "UMINA-2026-CH-03" (an Umiña ID: give --token umina)',
+    );
+    expect(calls.order).toEqual([]);
+  });
+
+  test("an Achala needs ACHALA_TOKEN_ID and TREASURY_ID", async () => {
+    mockDependencies();
+    await runScript(writeAchala(), "--token", "achala", "--dry-run");
+
+    expect(console.error).toHaveBeenCalledWith("   - ACHALA_TOKEN_ID is missing");
+    expect(console.error).toHaveBeenCalledWith("   - TREASURY_ID is missing");
+    expect(process.exitCode).toBe(1);
+  });
+
+  test("lists the stones still without TRANSFORMATION when one fails", async () => {
+    achalaEnv();
+    mockDependencies({ topicEvents: stoneEvents, transformationError: new Error("INVALID_SIGNATURE") });
+    await runScript(writeAchala(), "--token", "achala");
+
+    expect(console.error).toHaveBeenCalledWith(
+      "❌ Minted ACHALA-2026-RI-01 (serial 7) and recorded MINT, but TRANSFORMATION failed; still to record for: UMINA-2026-CH-03, UMINA-2026-AU-01",
+      expect.any(Error),
+    );
+    expect(process.exitCode).toBe(1);
+  });
+
+  test("--form --token achala sets umina_token_id from UMINA_TOKEN_ID, in the generated file too", async () => {
+    achalaEnv();
+    mockDependencies({ topicEvents: stoneEvents });
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "achala-form-"));
+    fs.writeFileSync(path.join(dir, "front.jpg"), photo);
+    const post = JSON.parse(fs.readFileSync("json/sample-achala-form-post.json", "utf8"));
+    Object.assign(post, {
+      stones: [{ serial: 3, stone_id: "UMINA-2026-CH-03" }],
+      metals: [{ stone_type: "gold", fineness: "18k", weight_g: 2, source: "umina", stone_id: "UMINA-2026-CH-03" }],
+      main_image: { file: "front.jpg", description: "Front" },
+    });
+    delete post.documents;
+    const file = path.join(dir, "post.json");
+    fs.writeFileSync(file, JSON.stringify(post));
+    await runScript("--form", file, "--token", "achala", "--out", path.join(dir, "generated"));
+
+    const { properties } = calls.pin.body.pinataContent;
+    expect(properties.umina_token_id).toBe("0.0.2002");
+    expect(properties.stones).toEqual([{ serial: 3, stone_id: "UMINA-2026-CH-03" }]);
+    const generated = JSON.parse(fs.readFileSync(path.join(dir, "generated", "ACHALA-2026-PE-99.json"), "utf8"));
+    expect(generated.properties.umina_token_id).toBe("0.0.2002");
+    expect(calls.order).toEqual(["compliance", "pinFile", "pinFile", "pin", "mint", "hcs", "transformation"]);
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  test("an Umiña mint records no TRANSFORMATION and reads no NFT", async () => {
+    mockDependencies();
+    await runScript(writeMetadata());
+
+    expect(calls.messages.map((m) => m.event)).toEqual(["COMPLIANCE", "MINT"]);
+    expect(calls.mirror.some((u) => u.includes("/nfts/"))).toBe(false);
+    expect(calls.messages[1].from_stone_ids).toBeUndefined();
+  });
+
+  test("refuses an unknown --token and a mistyped option before reading anything", async () => {
+    mockDependencies();
+    await runScript(writeMetadata(), "--token", "constructor");
+    expect(console.error).toHaveBeenCalledWith('   - --token must be umina or achala, got "constructor"');
+
+    jest.resetModules();
+    mockDependencies();
+    await runScript(writeMetadata(), "--dryrun");
+    expect(console.error).toHaveBeenCalledWith(expect.stringContaining("Unknown option '--dryrun'"));
+    expect(calls.order).toEqual([]);
   });
 });

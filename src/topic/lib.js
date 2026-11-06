@@ -1,7 +1,7 @@
 /**
  * @file topic/lib.js
  * @description Environment checks and the TopicCreateTransaction for the
- * Umiña Achala HCS topics, used by createUminaTopic.js and kept apart from it
+ * Umiña Achala HCS topics, used by createTopic.js and kept apart from it
  * so they can be tested without a network (umina-achala-chain#9).
  *
  * The data model (#10) has two topics: provenance (MINT, SALE and the item's

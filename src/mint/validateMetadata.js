@@ -1,11 +1,12 @@
 /**
- * Stand-alone validator for HIP-412 Umiña metadata: the schema plus the
- * stone type and RUC checks (see metadataValidator.js).
- * Usage: node src/mint/validateMetadata.js json/example.json
+ * Stand-alone validator for HIP-412 Umiña or Achala metadata: the schema plus
+ * the stone type and RUC checks (see metadataValidator.js). The class comes
+ * from properties.stone_id: ACHALA-... is an Achala, anything else an Umiña.
+ * Usage: node src/mint/validateMetadata.js json/umina-example.json
  */
 import fs from "fs";
 import { withPlaceholderAssets } from "./lib.js";
-import { validateMetadata } from "./metadataValidator.js";
+import { classOfMetadata, validateMetadata } from "./metadataValidator.js";
 
 const filePath = process.argv[2];
 if (!filePath) {
@@ -15,10 +16,10 @@ if (!filePath) {
 
 const metadata = JSON.parse(fs.readFileSync(filePath, "utf8"));
 // image and files are filled in at mint time, so check with placeholders
-const { valid, errors } = validateMetadata(withPlaceholderAssets(metadata));
+const { valid, errors } = validateMetadata(withPlaceholderAssets(metadata), classOfMetadata(metadata));
 
 if (valid) {
-  console.log("✅ Metadata JSON is valid.");
+  console.log(`✅ ${classOfMetadata(metadata) === "achala" ? "Achala" : "Umiña"} metadata JSON is valid.`);
 } else {
   console.error("❌ Validation failed:", errors);
   process.exit(1);

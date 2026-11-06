@@ -1,7 +1,7 @@
 import { jest } from "@jest/globals";
 import { PrivateKey } from "@hashgraph/sdk";
 
-// Runs src/token/createUminaToken.js itself (it calls main() on import) with dotenv
+// Runs src/token/createToken.js itself (it calls main() on import) with dotenv
 // and the network client mocked, and records how it signs and executes.
 
 const key = PrivateKey.generateECDSA().toStringDer();
@@ -60,13 +60,13 @@ function setEnv(extra = {}) {
 }
 
 async function runScript(...args) {
-  process.argv = ["node", "src/token/createUminaToken.js", ...args];
-  await import("../src/token/createUminaToken.js");
+  process.argv = ["node", "src/token/createToken.js", ...args];
+  await import("../src/token/createToken.js");
   // main() is not awaited by the module, so let its promises settle
   await new Promise((resolve) => setImmediate(resolve));
 }
 
-describe("createUminaToken.js", () => {
+describe("createToken.js", () => {
   const env = { ...process.env };
   const argv = [...process.argv];
   let log;
@@ -163,8 +163,32 @@ describe("createUminaToken.js", () => {
     mockDependencies();
     await runScript("--token", "gems");
 
-    expect(console.error).toHaveBeenCalledWith('❌ --token must be umina or achala, got "gems"');
+    expect(console.error).toHaveBeenCalledWith('   - --token must be umina or achala, got "gems"');
     expect(calls.signed).toEqual([]);
+    expect(process.exitCode).toBe(1);
+  });
+
+  test("--token=achala is the same as --token achala, not a silent Umiña", async () => {
+    mockDependencies();
+    await runScript("--token=achala");
+
+    expect(calls.tokenClass).toBe("achala");
+    expect(log).toHaveBeenCalledWith("SAVE THIS ID IN .env.testnet AS: ACHALA_TOKEN_ID");
+  });
+
+  test.each([
+    [["--token", "constructor"], '--token must be umina or achala, got "constructor"'],
+    [["--token", "__proto__"], '--token must be umina or achala, got "__proto__"'],
+    [["--token"], "argument missing"],
+    [["--tokn", "achala"], "Unknown option '--tokn'"],
+    [["a.testnet.env", "b.testnet.env"], "give at most one env file"],
+  ])("refuses %j before loading the env file or connecting", async (args, problem) => {
+    mockDependencies();
+    await runScript(...args);
+
+    expect(console.error).toHaveBeenCalledWith(expect.stringContaining(problem));
+    expect(calls.dotenv).not.toHaveBeenCalled();
+    expect(calls.forTestnet).not.toHaveBeenCalled();
     expect(process.exitCode).toBe(1);
   });
 

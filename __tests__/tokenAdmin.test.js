@@ -72,6 +72,10 @@ describe("parseAdminArgs", () => {
     expect(parseAdminArgs(["pause", "--token", "gems"]).problems).toEqual([
       '--token must be umina or achala, got "gems"',
     ]);
+    expect(parseAdminArgs(["pause", "--token=achala"]).tokenClass).toBe("achala");
+    expect(parseAdminArgs(["pause", "--token", "constructor"]).problems).toEqual([
+      '--token must be umina or achala, got "constructor"',
+    ]);
   });
 
   test("an Achala command needs ACHALA_TOKEN_ID, not UMINA_TOKEN_ID", () => {

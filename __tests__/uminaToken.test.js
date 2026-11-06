@@ -101,7 +101,7 @@ describe("buildTokenTransaction", () => {
     expect(tx.tokenName).toBe("Umiña");
     expect(tx.tokenSymbol).toBe("UMINA");
     expect(tx.tokenMemo).toBe(
-      "Umiña Achala: Authentic Peruvian Stones and Minerals",
+      "Umiña: Peruvian stones",
     );
   });
 
@@ -170,7 +170,7 @@ describe("the Achala class (umina-achala-chain#15)", () => {
   test("has its own name, symbol and memo", () => {
     expect(achala.tokenName).toBe("Achala");
     expect(achala.tokenSymbol).toBe("ACHALA");
-    expect(achala.tokenMemo).toBe("Umiña Achala: Peruvian Jewelry Set with Certified Umiña Stones");
+    expect(achala.tokenMemo).toBe("Achala: Peruvian jewelry made of Umiña stones");
     expect(TOKEN_CLASSES.achala.envVar).toBe("ACHALA_TOKEN_ID");
   });
 
