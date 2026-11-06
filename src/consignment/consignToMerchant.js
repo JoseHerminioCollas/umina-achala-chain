@@ -9,6 +9,10 @@
  * Run from the command line:
  * node src/consignment/consignToMerchant.js <serial> [--dry-run]
  *
+ * A serial mounted in an Achala that still exists is refused: it moves only
+ * with its Achala (umina-achala-chain#24). The provenance topic is read for
+ * that first, also on --dry-run.
+ *
  * The event is recorded only after the transfer and the allowance have both
  * succeeded. If a step fails after the NFT has moved, the script says what
  * already happened on the ledger, so it can be finished or recorded by hand.
@@ -29,6 +33,8 @@ import {
 import { associateToken, consignmentProblems } from "./lib.js";
 import { parseEcdsaKey, treasuryKeyProblem } from "../keys.js";
 import { buildEvent, loadSubmitKey, submitEvent, submitKeyProblem } from "../hcs.js";
+import { topicEvents } from "../mirror.js";
+import { mountedProblem } from "../mint/achala.js";
 
 const args = process.argv.slice(2);
 const dryRun = args.includes("--dry-run");
@@ -70,6 +76,26 @@ async function main() {
     const treasuryKey = process.env.TREASURY_KEY
       ? parseEcdsaKey(process.env.TREASURY_KEY)
       : null;
+
+    // A stone in an Achala is consigned only with its Achala (#24)
+    let events;
+    try {
+      events = await topicEvents(process.env.HCS_TOPIC_ID);
+    } catch (err) {
+      console.error(`❌ Cannot read HCS_TOPIC_ID ${process.env.HCS_TOPIC_ID}: ${err.message}`);
+      process.exitCode = 1;
+      return;
+    }
+    const mounted = mountedProblem(events, {
+      uminaTokenId: process.env.UMINA_TOKEN_ID,
+      achalaTokenId: process.env.ACHALA_TOKEN_ID,
+      serial,
+    });
+    if (mounted) {
+      console.error(`❌ ${mounted}`);
+      process.exitCode = 1;
+      return;
+    }
 
     if (dryRun) {
       console.log(`Would associate ${tokenId} with ${merchantId}`);

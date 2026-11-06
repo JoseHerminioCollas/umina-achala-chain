@@ -30,8 +30,8 @@
         "stones": {
           "type": "array",
           "minItems": 1,
-          "maxItems": 10,
-          "description": "The Umiña NFTs the piece is made of, at least one, each by its serial in umina_token_id and its stone_id. The mint script checks each one exists, is held by the treasury, matches its MINT event and is not already in another Achala.",
+          "maxItems": 9,
+          "description": "The Umiña NFTs the piece is made of, 1 to 9 (an Achala is sold with its stones in one transfer, at most 10 NFTs), each by its serial in umina_token_id and its stone_id. The mint script checks each one exists, is held by the treasury, matches its MINT event and is not already in another Achala.",
           "items": {
             "type": "object",
             "required": ["serial", "stone_id"],

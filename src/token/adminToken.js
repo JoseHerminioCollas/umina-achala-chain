@@ -22,6 +22,11 @@
  * Achala NFT of a piece that is disassembled; its Umiña NFTs are kept
  * (umina-achala-chain#16).
  *
+ * wipe and burn of an Umiña refuse a serial mounted in an Achala that still
+ * exists: burn the Achala instead (--token achala), which frees its stones
+ * (umina-achala-chain#24). The provenance topic is read for that first, also
+ * on --dry-run.
+ *
  * wipe and burn change an item, so they record a BURN event in the
  * provenance topic (#10) with the reason and how it happened (method "wipe"
  * or "burn"); the reason is public and permanent, so no personal data. They
@@ -51,6 +56,8 @@ import {
 } from "./lib.js";
 import { parseEcdsaKey } from "../keys.js";
 import { buildEvent, loadSubmitKey, submitEvent } from "../hcs.js";
+import { topicEvents } from "../mirror.js";
+import { mountedProblem } from "../mint/achala.js";
 
 dotenv.config({ path: ".env.testnet" });
 
@@ -108,6 +115,22 @@ async function main() {
 
     const tokenId = TokenId.fromString(process.env[TOKEN_CLASSES[input.tokenClass].envVar]);
     const { key } = ADMIN_COMMANDS[input.command];
+
+    // An Umiña in an Achala is burned only by burning the Achala (#24)
+    if (input.tokenClass === "umina" && (input.command === "wipe" || input.command === "burn")) {
+      let events;
+      try {
+        events = await topicEvents(process.env.HCS_TOPIC_ID);
+      } catch (err) {
+        return fail([`cannot read HCS_TOPIC_ID ${process.env.HCS_TOPIC_ID}: ${err.message}`]);
+      }
+      const mounted = mountedProblem(events, {
+        uminaTokenId: process.env.UMINA_TOKEN_ID,
+        achalaTokenId: process.env.ACHALA_TOKEN_ID,
+        serial: input.serial,
+      });
+      if (mounted) return fail([`${mounted}; burn the Achala first (--token achala)`]);
+    }
     console.log(`Would ${describe(input, process.env, tokenId)}, signed by ${key}.`);
     if (input.dryRun) {
       console.log("Dry run, nothing sent.");

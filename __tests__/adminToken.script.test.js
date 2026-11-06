@@ -1,4 +1,5 @@
 import { jest } from "@jest/globals";
+import { mockMirror, restoreMirror } from "../testHelpers/mockMirror.js";
 import { PrivateKey, Status } from "@hashgraph/sdk";
 
 // Runs src/token/adminToken.js itself (it calls main() on import) with
@@ -46,7 +47,8 @@ function mockTransaction(name, { executeError, receiptError } = {}) {
   });
 }
 
-function mockDependencies({ holder = "0.0.6006", hcsReceiptError } = {}) {
+function mockDependencies({ holder = "0.0.6006", hcsReceiptError, topicEvents = [] } = {}) {
+  calls.mirror = mockMirror(topicEvents);
   calls.steps = [];
   calls.close = jest.fn();
   calls.forTestnet = jest.fn(() => ({ setOperator: jest.fn().mockReturnThis(), close: calls.close }));
@@ -103,6 +105,7 @@ describe("adminToken.js", () => {
   });
 
   afterEach(() => {
+    restoreMirror();
     process.env = { ...env };
     process.argv = [...argv];
     process.exitCode = undefined;
@@ -232,5 +235,44 @@ describe("adminToken.js", () => {
     expect(console.error).toHaveBeenCalledWith("   - WIPE_KEY is not set");
     expect(calls.forTestnet).not.toHaveBeenCalled();
     expect(process.exitCode).toBe(1);
+  });
+
+  // --- Mounted stones (umina-achala-chain#24) ---
+  const mountedTopic = (achala) => [
+    { event: "MINT", stone_id: "UMINA-2026-CH-07", token_id: "0.0.2002", serials: ["7"] },
+    { event: "MINT", stone_id: "ACHALA-2026-RI-01", token_id: achala, serials: ["1"], from_stone_ids: ["UMINA-2026-CH-07"] },
+  ];
+
+  test.each([
+    ["burn", ["burn", "7", "--reason", "x"]],
+    ["wipe", ["wipe", "7", "--account", "0.0.6006", "--reason", "x"]],
+    ["burn --dry-run", ["burn", "7", "--reason", "x", "--dry-run"]],
+  ])("%s refuses an Umiña mounted in an Achala, and sends nothing", async (_, args) => {
+    process.env.ACHALA_TOKEN_ID = "0.0.4004";
+    mockDependencies({ topicEvents: mountedTopic("0.0.4004") });
+    await runScript(...args);
+
+    expect(console.error).toHaveBeenCalledWith(
+      "   - UMINA-2026-CH-07 (0.0.2002/7) is mounted in Achala ACHALA-2026-RI-01 (0.0.4004/1, MINT #2): " +
+        "it moves only with its Achala, and is freed when the Achala is burned; burn the Achala first (--token achala)",
+    );
+    expect(calls.forTestnet).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(1);
+  });
+
+  test("burning an Achala reads no topic: it is how its stones are freed", async () => {
+    process.env.ACHALA_TOKEN_ID = "0.0.4004";
+    mockDependencies({ holder: "0.0.1001", topicEvents: mountedTopic("0.0.4004") });
+    await runScript("burn", "1", "--reason", "Piece disassembled", "--token", "achala");
+
+    expect(calls.mirror).toEqual([]);
+    expect(step("burn")).toBeDefined();
+  });
+
+  test("pause reads no topic", async () => {
+    mockDependencies();
+    await runScript("pause");
+
+    expect(calls.mirror).toEqual([]);
   });
 });

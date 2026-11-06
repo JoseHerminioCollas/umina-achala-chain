@@ -10,11 +10,12 @@
  *
  * node src/record/recordEvent.js sale <serial> --seller <id> --buyer <id>
  *   --nft-tx <tx-id> --payment <on_chain|off_chain> [--payment-tx <tx-id>]
- *   [--sold-for <amount> [--currency <code>]] [--stone-id <id>] [--dry-run]
+ *   [--sold-for <amount> [--currency <code>]] [--stone-id <id>]
+ *   [--token umina|achala] [--dry-run]
  *
  * node src/record/recordEvent.js delivered <serial> --buyer <id>
  *   [--method in_person] [--delivered-at <date-time>] [--proof <file>]
- *   [--stone-id <id>] [--dry-run]
+ *   [--stone-id <id>] [--token umina|achala] [--dry-run]
  *
  * sale: --nft-tx is the transaction that moved the NFT; it must show this
  * serial going from the seller to the buyer. With on_chain, the buyer's HBAR
@@ -29,6 +30,14 @@
  * account key. With it, the signature is checked and its hash recorded
  * (proof "signed"); without it, the event is recorded with proof "none". A
  * DELIVERED already recorded for the same sale is refused.
+ *
+ * --token achala records the event for an Achala (a piece of jewelry,
+ * umina-achala-chain#26), with ACHALA_TOKEN_ID. Its sale moves the Achala and
+ * every Umiña stone in it (from_stone_ids in its MINT event), so the SALE
+ * checks that --nft-tx moved all of them from the seller to the buyer, and
+ * adds from_stone_ids, umina_token_id and umina_serials. A DELIVERED is one
+ * event on the Achala; the stones get no events of their own. Its stone_id
+ * comes from the Achala's MINT unless --stone-id is given.
  *
  * Every run reads the topic and the ledger from the mirror node. --dry-run
  * does all the checks, prints the event and sends nothing.
@@ -53,6 +62,8 @@ import {
 import { accountKey, nftInfo, topicEvents, transactionRecord } from "../mirror.js";
 import { buildEvent, loadSubmitKey, submitEvent } from "../hcs.js";
 import { parseEcdsaKey } from "../keys.js";
+import { achalaSaleFields, achalaSalePlan, mintOfSerial } from "../mint/achala.js";
+import { TOKEN_CLASSES } from "../token/lib.js";
 
 dotenv.config({ path: ".env.testnet" });
 
@@ -64,7 +75,21 @@ function fail(problems) {
 
 /** Checks a sale against the topic and the ledger; returns the event or problems. */
 async function prepareSale(input, env, events) {
-  const tokenId = env.UMINA_TOKEN_ID;
+  const tokenId = env[TOKEN_CLASSES[input.tokenClass].envVar];
+  // An Achala's sale moves its stones too: find them from its MINT (#26)
+  let plan;
+  if (input.tokenClass === "achala") {
+    plan = achalaSalePlan(events, { uminaTokenId: env.UMINA_TOKEN_ID, achalaTokenId: tokenId, serial: input.serial });
+    if (plan.problems.length) return { problems: plan.problems };
+    if (input.stoneId && input.stoneId !== plan.achalaId) {
+      return { problems: [`--stone-id ${input.stoneId} is not this Achala, ${plan.achalaId}`] };
+    }
+  }
+  const alsoMoved = (plan?.stones ?? []).map((s) => ({
+    tokenId: env.UMINA_TOKEN_ID,
+    serial: s.serial,
+    stoneId: s.stone_id,
+  }));
   const earlier = findSaleByRef(events, input.nftTx);
   if (earlier) {
     return {
@@ -73,27 +98,31 @@ async function prepareSale(input, env, events) {
   }
   const nftRecord = await transactionRecord(input.nftTx);
   const paymentRecord = input.paymentTx ? await transactionRecord(input.paymentTx) : null;
-  const problems = saleLedgerProblems(input, tokenId, nftRecord, paymentRecord);
+  const problems = saleLedgerProblems(input, tokenId, nftRecord, paymentRecord, alsoMoved);
   if (problems.length) return { problems };
   return {
     event: buildEvent(
       {
         event: "SALE",
-        stoneId: input.stoneId,
+        stoneId: input.stoneId ?? plan?.achalaId,
         tokenId,
         serials: [input.serial],
         actorId: env.OPERATOR_ID,
         occurredAt: consensusDate(nftRecord.consensus_timestamp),
         ref: input.nftTx,
       },
-      saleFields(input),
+      { ...saleFields(input), ...(plan && achalaSaleFields(plan.stones, env.UMINA_TOKEN_ID)) },
     ),
   };
 }
 
 /** Checks a delivery against the topic and the ledger; returns the event or problems. */
 async function prepareDelivery(input, env, events) {
-  const tokenId = env.UMINA_TOKEN_ID;
+  const tokenId = env[TOKEN_CLASSES[input.tokenClass].envVar];
+  // An Achala's stone_id comes from its MINT, unless given
+  const stoneId =
+    input.stoneId ??
+    (input.tokenClass === "achala" ? mintOfSerial(events, tokenId, input.serial)?.event.stone_id : undefined);
   const nft = await nftInfo(tokenId, input.serial);
   if (!nft || nft.deleted) {
     return { problems: [`${tokenId} serial ${input.serial} does not exist`] };
@@ -144,7 +173,7 @@ async function prepareDelivery(input, env, events) {
     event: buildEvent(
       {
         event: "DELIVERED",
-        stoneId: input.stoneId,
+        stoneId,
         tokenId,
         serials: [input.serial],
         actorId: env.OPERATOR_ID,
@@ -161,7 +190,9 @@ async function main() {
   try {
     // --- 1. Check the arguments and the environment ---
     const input = parseRecordArgs(process.argv.slice(2));
-    const problems = [...input.problems, ...recordEnvProblems(process.env)];
+    // An unknown --token is already in input.problems; check the env as for an Umiña then
+    const envClass = Object.hasOwn(TOKEN_CLASSES, input.tokenClass ?? "") ? input.tokenClass : "umina";
+    const problems = [...input.problems, ...recordEnvProblems(process.env, envClass)];
     if (problems.length) return fail(problems);
 
     // --- 2. Read the topic, then check the event against it and the ledger ---

@@ -70,7 +70,7 @@ function mockDependencies({ events = [], transactions = {}, nft, key, hcsReceipt
       const record = transactions[p.split("/").pop()];
       return record ? reply(200, { transactions: [record] }) : reply(404);
     }
-    if (p.startsWith(`/api/v1/tokens/${TOKEN}/nfts/`)) return nft ? reply(200, nft) : reply(404);
+    if (/^\/api\/v1\/tokens\/[\d.]+\/nfts\//.test(p)) return nft ? reply(200, nft) : reply(404);
     if (p.startsWith("/api/v1/accounts/")) return key ? reply(200, { key }) : reply(404);
     return reply(404);
   });
@@ -345,4 +345,108 @@ describe("recordEvent.js", () => {
     expect(console.error).toHaveBeenCalledWith("   - HCS_TOPIC_ID is not set");
     expect(global.fetch).not.toHaveBeenCalled();
   });
+
+  // --- An Achala (umina-achala-chain#26) ---
+  describe("--token achala", () => {
+    const ACHALA = "0.0.8008";
+    const achalaTopic = [
+      { event: "MINT", stone_id: "UMINA-2026-CH-03", token_id: TOKEN, serials: ["3"] },
+      { event: "MINT", stone_id: "UMINA-2026-AU-01", token_id: TOKEN, serials: ["4"] },
+      {
+        event: "MINT",
+        stone_id: "ACHALA-2026-RI-01",
+        token_id: ACHALA,
+        serials: ["1"],
+        from_stone_ids: ["UMINA-2026-CH-03", "UMINA-2026-AU-01"],
+      },
+    ];
+    const move = (token, serial) => ({
+      token_id: token,
+      serial_number: serial,
+      sender_account_id: SELLER,
+      receiver_account_id: BUYER,
+    });
+    const pieceSale = (moves) => ({
+      ...atomicSale,
+      nft_transfers: moves,
+    });
+    const achalaSale = (...extra) => [
+      "sale", "1", "--seller", SELLER, "--buyer", BUYER, "--nft-tx", NFT_TX, "--token", "achala", ...extra,
+    ];
+
+    beforeEach(() => {
+      process.env.ACHALA_TOKEN_ID = ACHALA;
+    });
+
+    test("records the sale of an Achala that moved with its stones, naming them", async () => {
+      mockDependencies({
+        events: achalaTopic,
+        transactions: {
+          "0.0.6006-1700000000-000000001": pieceSale([move(ACHALA, 1), move(TOKEN, 3), move(TOKEN, 4)]),
+        },
+      });
+      await runScript(...achalaSale("--payment", "on_chain"));
+
+      expect(calls.hcs.message).toMatchObject({
+        event: "SALE",
+        stone_id: "ACHALA-2026-RI-01",
+        token_id: ACHALA,
+        serials: ["1"],
+        seller_id: SELLER,
+        buyer_id: BUYER,
+        from_stone_ids: ["UMINA-2026-CH-03", "UMINA-2026-AU-01"],
+        umina_token_id: TOKEN,
+        umina_serials: ["3", "4"],
+      });
+      expect(process.exitCode).toBeUndefined();
+    });
+
+    test("refuses a sale whose transfer left a stone behind", async () => {
+      mockDependencies({
+        events: achalaTopic,
+        transactions: { "0.0.6006-1700000000-000000001": pieceSale([move(ACHALA, 1), move(TOKEN, 3)]) },
+      });
+      await runScript(...achalaSale("--payment", "on_chain"));
+
+      expect(console.error).toHaveBeenCalledWith(
+        `   - --nft-tx ${NFT_TX} did not move ${TOKEN} serial 4 (UMINA-2026-AU-01, in the Achala) from ${SELLER} to ${BUYER}`,
+      );
+      expect(calls.hcs).toBeNull();
+      expect(process.exitCode).toBe(1);
+    });
+
+    test("refuses a --stone-id that is not the Achala", async () => {
+      mockDependencies({ events: achalaTopic });
+      await runScript(...achalaSale("--payment", "off_chain", "--stone-id", "ACHALA-2026-RI-09"));
+
+      expect(console.error).toHaveBeenCalledWith("   - --stone-id ACHALA-2026-RI-09 is not this Achala, ACHALA-2026-RI-01");
+    });
+
+    test("records DELIVERED for the Achala, its stone_id from its MINT", async () => {
+      mockDependencies({
+        events: [...achalaTopic, { event: "SALE", token_id: ACHALA, serials: ["1"], buyer_id: BUYER, ref: NFT_TX }],
+        nft: { account_id: BUYER, deleted: false },
+      });
+      await runScript("delivered", "1", "--buyer", BUYER, "--token", "achala");
+
+      expect(calls.hcs.message).toMatchObject({
+        event: "DELIVERED",
+        stone_id: "ACHALA-2026-RI-01",
+        token_id: ACHALA,
+        serials: ["1"],
+        buyer_id: BUYER,
+        ref: NFT_TX,
+      });
+    });
+
+    test("needs ACHALA_TOKEN_ID", async () => {
+      delete process.env.ACHALA_TOKEN_ID;
+      mockDependencies({ events: achalaTopic });
+      await runScript(...achalaSale("--payment", "off_chain"));
+
+      expect(console.error).toHaveBeenCalledWith("   - ACHALA_TOKEN_ID is not set");
+      expect(process.exitCode).toBe(1);
+    });
+  });
 });
+

@@ -1,4 +1,5 @@
 import { jest } from "@jest/globals";
+import { mockMirror, restoreMirror } from "../testHelpers/mockMirror.js";
 import { PrivateKey } from "@hashgraph/sdk";
 import { saleProblems } from "../src/sale/lib.js";
 
@@ -42,7 +43,8 @@ function mockTransaction(name, { executeError, receiptError, txId } = {}) {
   });
 }
 
-function mockDependencies({ holder = "0.0.1001", saleError, hcsReceiptError } = {}) {
+function mockDependencies({ holder = "0.0.1001", saleError, hcsReceiptError, topicEvents = [] } = {}) {
+  calls.mirror = mockMirror(topicEvents);
   calls.steps = [];
   calls.close = jest.fn();
   calls.forTestnet = jest.fn(() => ({ setOperator: jest.fn().mockReturnThis(), close: calls.close }));
@@ -120,6 +122,15 @@ describe("saleProblems", () => {
     ]);
   });
 
+  test("an Achala sale needs ACHALA_TOKEN_ID, and UMINA_TOKEN_ID for its stones", () => {
+    const env = baseEnv();
+    delete env.UMINA_TOKEN_ID;
+    expect(saleProblems(env, "1", "100", "achala")).toEqual([
+      "UMINA_TOKEN_ID is not set",
+      "ACHALA_TOKEN_ID is not set",
+    ]);
+  });
+
   test("rejects an HCS_SUBMIT_KEY that is not an ECDSA key", () => {
     expect(saleProblems({ ...baseEnv(), HCS_SUBMIT_KEY: "x" }, "7", "100")).toEqual([
       "HCS_SUBMIT_KEY is not an ECDSA private key (hex or DER)",
@@ -143,6 +154,7 @@ describe("sellOwnItem.js", () => {
   });
 
   afterEach(() => {
+    restoreMirror();
     process.env = { ...env };
     process.argv = [...argv];
     process.exitCode = undefined;
@@ -220,7 +232,7 @@ describe("sellOwnItem.js", () => {
 
     expect(calls.infoFor).toBe("0.0.2002/7");
     expect(console.error).toHaveBeenCalledWith(
-      "❌ 0.0.2002/7 is held by 0.0.7007, not the Treasury 0.0.1001. Remove the listing.",
+      "   - 0.0.2002/7 is held by 0.0.7007, not the Treasury 0.0.1001. Remove the listing.",
     );
     expect(calls.steps).toEqual([]);
     expect(process.exitCode).toBe(1);
@@ -264,5 +276,111 @@ describe("sellOwnItem.js", () => {
     expect(console.table).toHaveBeenCalled();
     expect(console.log).toHaveBeenCalledWith("Dry run, nothing sent.");
     expect(calls.forTestnet).not.toHaveBeenCalled();
+  });
+
+  // --- An Achala and mounted stones (umina-achala-chain#24, #26) ---
+
+  const topic = [
+    { event: "MINT", stone_id: "UMINA-2026-CH-03", token_id: "0.0.2002", serials: ["3"] },
+    { event: "MINT", stone_id: "UMINA-2026-AU-01", token_id: "0.0.2002", serials: ["4"] },
+    {
+      event: "MINT",
+      stone_id: "ACHALA-2026-RI-01",
+      token_id: "0.0.4004",
+      serials: ["1"],
+      from_stone_ids: ["UMINA-2026-CH-03", "UMINA-2026-AU-01"],
+    },
+  ];
+
+  test("reads the provenance topic before selling, also on --dry-run", async () => {
+    mockDependencies();
+    await runScript("7", "100", "--dry-run");
+
+    expect(calls.mirror).toEqual([
+      "https://testnet.mirrornode.hedera.com/api/v1/topics/0.0.3003",
+      "https://testnet.mirrornode.hedera.com/api/v1/topics/0.0.3003/messages?limit=100&order=asc",
+    ]);
+  });
+
+  test.each([[[]], [["--dry-run"]]])("refuses an Umiña mounted in an Achala, and sends nothing %j", async (extra) => {
+    process.env.ACHALA_TOKEN_ID = "0.0.4004";
+    mockDependencies({ topicEvents: topic });
+    await runScript("3", "100", ...extra);
+
+    expect(console.error).toHaveBeenCalledWith(
+      "   - UMINA-2026-CH-03 (0.0.2002/3) is mounted in Achala ACHALA-2026-RI-01 (0.0.4004/1, MINT #3): " +
+        "it moves only with its Achala, and is freed when the Achala is burned",
+    );
+    expect(calls.forTestnet).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(1);
+  });
+
+  test("sells an Umiña whose Achala was burned", async () => {
+    process.env.ACHALA_TOKEN_ID = "0.0.4004";
+    mockDependencies({ topicEvents: [...topic, { event: "BURN", token_id: "0.0.4004", serials: ["1"] }] });
+    await runScript("3", "100");
+
+    expect(calls.steps.map((s) => s.name)).toEqual(["sale", "hcs"]);
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  test("--token achala sells the Achala with its stones in one transfer and records one SALE", async () => {
+    process.env.ACHALA_TOKEN_ID = "0.0.4004";
+    mockDependencies({ topicEvents: topic });
+    await runScript("1", "500", "--token", "achala");
+
+    const sale = step("sale");
+    expect(callsTo(sale, "addNftTransfer").map(([id, from, to]) => [id.toString(), from.toString(), to.toString()])).toEqual([
+      ["0.0.4004/1", "0.0.1001", "0.0.6006"],
+      ["0.0.2002/3", "0.0.1001", "0.0.6006"],
+      ["0.0.2002/4", "0.0.1001", "0.0.6006"],
+    ]);
+    expect(hbarMoves(sale)).toEqual([
+      ["0.0.6006", "-50000000000"],
+      ["0.0.1001", "50000000000"],
+    ]);
+    expect(callsTo(sale, "setTransactionMemo")).toEqual([["Achala sale 0.0.4004/1"]]);
+    expect(JSON.parse(callsTo(step("hcs"), "setMessage")[0][0])).toMatchObject({
+      event: "SALE",
+      stone_id: "ACHALA-2026-RI-01",
+      token_id: "0.0.4004",
+      serials: ["1"],
+      ref: "0.0.1001@1700000000.7",
+      seller_id: "0.0.1001",
+      buyer_id: "0.0.6006",
+      sold_for: "500",
+      from_stone_ids: ["UMINA-2026-CH-03", "UMINA-2026-AU-01"],
+      umina_token_id: "0.0.2002",
+      umina_serials: ["3", "4"],
+    });
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  test("--token achala sells nothing when the Treasury no longer holds one of the NFTs", async () => {
+    process.env.ACHALA_TOKEN_ID = "0.0.4004";
+    mockDependencies({ topicEvents: topic, holder: "0.0.7007" });
+    await runScript("1", "500", "--token", "achala");
+
+    expect(console.error).toHaveBeenCalledWith(
+      "   - 0.0.4004/1 is held by 0.0.7007, not the Treasury 0.0.1001. Remove the listing.",
+    );
+    expect(calls.steps).toEqual([]);
+  });
+
+  test("--token achala refuses a burned Achala", async () => {
+    process.env.ACHALA_TOKEN_ID = "0.0.4004";
+    mockDependencies({ topicEvents: [...topic, { event: "BURN", token_id: "0.0.4004", serials: ["1"] }] });
+    await runScript("1", "500", "--token", "achala", "--dry-run");
+
+    expect(console.error).toHaveBeenCalledWith("   - Achala 0.0.4004/1 is burned (the piece was taken apart)");
+    expect(process.exitCode).toBe(1);
+  });
+
+  test("refuses an unknown --token", async () => {
+    mockDependencies();
+    await runScript("1", "500", "--token", "ring");
+
+    expect(console.error).toHaveBeenCalledWith('   - --token must be umina or achala, got "ring"');
+    expect(calls.mirror).toEqual([]);
   });
 });

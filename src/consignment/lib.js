@@ -10,6 +10,7 @@ import {
   Status,
   TokenAssociateTransaction,
 } from "@hashgraph/sdk";
+import { TOKEN_CLASSES } from "../token/lib.js";
 
 /** Test accounts that can associate the token, by role (env var prefix). */
 export const ROLES = { merchant: "MERCHANT", buyer: "BUYER" };
@@ -51,12 +52,13 @@ export function consignmentProblems(env, required, serial) {
  * Lists the problems with associateToken.js's role and environment.
  * @param {Record<string, string | undefined>} env
  * @param {string | undefined} role "merchant" or "buyer"
+ * @param {"umina" | "achala"} [tokenClass] the token to associate
  * @returns {string[]}
  */
-export function roleProblems(env, role) {
+export function roleProblems(env, role, tokenClass = "umina") {
   const prefix = ROLES[role];
   if (!prefix) return [`give the role: ${Object.keys(ROLES).join(" or ")}`];
-  return ["OPERATOR_ID", "OPERATOR_KEY", "UMINA_TOKEN_ID", `${prefix}_ID`, `${prefix}_KEY`]
+  return ["OPERATOR_ID", "OPERATOR_KEY", TOKEN_CLASSES[tokenClass].envVar, `${prefix}_ID`, `${prefix}_KEY`]
     .filter((k) => !env[k])
     .map((k) => `${k} is not set`);
 }

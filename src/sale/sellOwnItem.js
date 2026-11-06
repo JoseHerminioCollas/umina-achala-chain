@@ -1,17 +1,31 @@
 /**
  * @file sellOwnItem.js
- * @description Sells an Umiña NFT that UA holds itself, straight from the
- * Treasury, on Hedera TESTNET, in one atomic transfer: the buyer pays the price
- * in HBAR to UA, and the Treasury sends the NFT to the buyer. The sale is then
+ * @description Sells an NFT that UA holds itself, straight from the Treasury,
+ * on Hedera TESTNET, in one atomic transfer: the buyer pays the price in HBAR
+ * to UA, and the Treasury sends the NFT to the buyer. The sale is then
  * recorded as SALE in HCS (umina-achala-chain#19).
  *
  * Run from the command line:
- * node src/sale/sellOwnItem.js <serial> <price-hbar> [--dry-run]
+ * node src/sale/sellOwnItem.js <serial> <price-hbar> [--token umina|achala] [--dry-run]
+ *
+ * An Umiña (a stone, the default) is refused while it is mounted in an
+ * Achala that still exists: it moves only with its Achala (#24).
+ *
+ * With --token achala the serial is an Achala (a piece of jewelry), and the
+ * same transfer also moves every Umiña mounted in it, so a piece with N
+ * stones moves N+1 NFTs (#16, #26). Its stones come from the Achala's MINT
+ * event (from_stone_ids) and each stone's serial from its own MINT. One
+ * transfer moves at most 10 NFTs (MAX_NFT_TRANSFERS in mint/achala.js). The
+ * SALE names the Achala and adds its stones and their Umiña serials. The
+ * buyer must have associated both tokens (associateToken.js --token).
  *
  * UA (the operator) pays the fees and receives the price. The buyer signs
  * because HBAR leaves their account; on testnet BUYER_KEY simulates that. The
  * Treasury signs the NFT transfer: with TREASURY_KEY when it is not the
- * operator account. The buyer must have associated the Umiña token.
+ * operator account.
+ *
+ * Every run reads the provenance topic first; --dry-run does that check,
+ * shows the sale and sends nothing.
  *
  * No consignment, allowance or split is involved (see consignment/ for those).
  * A royalty is not expected, because the Treasury is the fee collector; check
@@ -29,31 +43,37 @@ import {
   TokenNftInfoQuery,
   TransferTransaction,
 } from "@hashgraph/sdk";
-import { saleProblems } from "./lib.js";
+import { parseSaleArgs, saleProblems } from "./lib.js";
 import { parseEcdsaKey } from "../keys.js";
 import { buildEvent, loadSubmitKey, submitEvent } from "../hcs.js";
+import { topicEvents } from "../mirror.js";
+import { achalaSaleFields, achalaSalePlan, mountedProblem } from "../mint/achala.js";
+import { TOKEN_CLASSES } from "../token/lib.js";
 
-const args = process.argv.slice(2);
-const dryRun = args.includes("--dry-run");
-const [serial, price] = args.filter((a) => !a.startsWith("--"));
+const input = parseSaleArgs(process.argv.slice(2));
+const { serial, price, tokenClass, dryRun } = input;
+const isAchala = tokenClass === "achala";
 dotenv.config({ path: ".env.testnet" });
+
+function fail(problems) {
+  console.error("❌ Problems found:");
+  problems.forEach((p) => console.error(`   - ${p}`));
+  process.exitCode = 1;
+}
 
 async function main() {
   let client;
   try {
     // --- 1. Check the arguments and environment ---
-    const problems = saleProblems(process.env, serial, price);
-    if (problems.length) {
-      console.error("❌ Problems found:");
-      problems.forEach((p) => console.error(`   - ${p}`));
-      process.exitCode = 1;
-      return;
-    }
+    const problems = [...input.problems];
+    if (!problems.length) problems.push(...saleProblems(process.env, serial, price, tokenClass));
+    if (problems.length) return fail(problems);
 
+    const { name: className, envVar } = TOKEN_CLASSES[tokenClass];
     const uaId = AccountId.fromString(process.env.OPERATOR_ID);
     const treasuryId = AccountId.fromString(process.env.TREASURY_ID);
     const buyerId = AccountId.fromString(process.env.BUYER_ID);
-    const tokenId = TokenId.fromString(process.env.UMINA_TOKEN_ID);
+    const tokenId = TokenId.fromString(process.env[envVar]);
     const nftId = new NftId(tokenId, Number(serial));
     const buyerKey = parseEcdsaKey(process.env.BUYER_KEY);
     const treasuryKey =
@@ -62,8 +82,33 @@ async function main() {
         : parseEcdsaKey(process.env.TREASURY_KEY);
     const priceHbar = Hbar.fromString(price);
 
+    // --- 2. Check the item against the provenance topic ---
+    let events;
+    try {
+      events = await topicEvents(process.env.HCS_TOPIC_ID);
+    } catch (err) {
+      return fail([`cannot read HCS_TOPIC_ID ${process.env.HCS_TOPIC_ID}: ${err.message}`]);
+    }
+    const ids = {
+      uminaTokenId: process.env.UMINA_TOKEN_ID,
+      achalaTokenId: process.env.ACHALA_TOKEN_ID,
+      serial,
+    };
+    // An Achala moves with its stones; an Umiña must not be in an Achala
+    let plan = { stones: [] };
+    if (isAchala) {
+      plan = achalaSalePlan(events, ids);
+      if (plan.problems.length) return fail(plan.problems);
+    } else {
+      const mounted = mountedProblem(events, ids);
+      if (mounted) return fail([mounted]);
+    }
+    const uminaTokenId = isAchala ? TokenId.fromString(process.env.UMINA_TOKEN_ID) : null;
+    const nftIds = [nftId, ...plan.stones.map((s) => new NftId(uminaTokenId, Number(s.serial)))];
+
     console.table({
       nft: nftId.toString(),
+      ...(isAchala && { piece: plan.achalaId, stones: plan.stones.map((s) => s.stone_id).join(", ") }),
       from: treasuryId.toString(),
       to: buyerId.toString(),
       price: priceHbar.toString(),
@@ -74,41 +119,45 @@ async function main() {
       return;
     }
 
-    // --- 2. Connect to Hedera testnet as UA ---
+    // --- 3. Connect to Hedera testnet as UA ---
     client = Client.forTestnet().setOperator(uaId, parseEcdsaKey(process.env.OPERATOR_KEY));
 
-    // --- 3. Check the Treasury still holds the serial ---
-    const [info] = await new TokenNftInfoQuery().setNftId(nftId).execute(client);
-    if (info.accountId.toString() !== treasuryId.toString()) {
-      console.error(
-        `❌ ${nftId} is held by ${info.accountId}, not the Treasury ${treasuryId}. Remove the listing.`,
-      );
-      process.exitCode = 1;
-      return;
+    // --- 4. Check the Treasury still holds every NFT that moves ---
+    for (const id of nftIds) {
+      const [info] = await new TokenNftInfoQuery().setNftId(id).execute(client);
+      if (info.accountId.toString() !== treasuryId.toString()) {
+        return fail([`${id} is held by ${info.accountId}, not the Treasury ${treasuryId}. Remove the listing.`]);
+      }
     }
 
-    // --- 4. One atomic transfer: the price to UA, the NFT to the buyer ---
+    // --- 5. One atomic transfer: the price to UA, the NFT(s) to the buyer ---
     let saleTx = new TransferTransaction()
       .addHbarTransfer(buyerId, priceHbar.negated())
-      .addHbarTransfer(uaId, priceHbar)
-      .addNftTransfer(nftId, treasuryId, buyerId)
-      .setTransactionMemo(`Umiña sale ${nftId}`)
-      .freezeWith(client);
+      .addHbarTransfer(uaId, priceHbar);
+    for (const id of nftIds) saleTx = saleTx.addNftTransfer(id, treasuryId, buyerId);
+    saleTx = saleTx.setTransactionMemo(`${className} sale ${nftId}`).freezeWith(client);
     saleTx = await saleTx.sign(buyerKey);
     if (treasuryKey) saleTx = await saleTx.sign(treasuryKey);
     const saleResponse = await saleTx.execute(client);
     const saleReceipt = await saleResponse.getReceipt(client);
     const saleTxId = saleResponse.transactionId.toString();
-    console.log(`✅ Sold ${nftId} to ${buyerId}: ${saleReceipt.status} (${saleTxId})`);
+    console.log(`✅ Sold ${nftIds.join(", ")} to ${buyerId}: ${saleReceipt.status} (${saleTxId})`);
 
-    // --- 5. Record the sale in HCS ---
+    // --- 6. Record the sale in HCS ---
     // The sale has settled, so if this fails say so and keep what is needed
     // to record it by hand. submitEvent waits for the receipt, so a message
     // rejected at consensus lands here too.
     let hcsTxId;
     try {
       const message = buildEvent(
-        { event: "SALE", tokenId, serials: [serial], actorId: uaId, ref: saleTxId },
+        {
+          event: "SALE",
+          ...(isAchala && { stoneId: plan.achalaId }),
+          tokenId,
+          serials: [serial],
+          actorId: uaId,
+          ref: saleTxId,
+        },
         {
           seller_id: treasuryId.toString(),
           buyer_id: buyerId.toString(),
@@ -116,6 +165,7 @@ async function main() {
           sold_for: priceHbar.toBigNumber().toString(),
           currency: "HBAR",
           price_tinybars: priceHbar.toTinybars().toString(),
+          ...(isAchala && achalaSaleFields(plan.stones, uminaTokenId)),
         },
       );
       hcsTxId = await submitEvent(
@@ -130,7 +180,7 @@ async function main() {
       return;
     }
 
-    // --- 6. Provenance logging ---
+    // --- 7. Provenance logging ---
     console.table({
       event: "SALE",
       nft: nftId.toString(),

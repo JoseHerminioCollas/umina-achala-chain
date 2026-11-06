@@ -11,6 +11,12 @@ describe("roleProblems", () => {
     expect(roleProblems(base, "buyer")).toEqual(["BUYER_ID is not set", "BUYER_KEY is not set"]);
     expect(roleProblems({ ...base, MERCHANT_ID: "0.0.2", MERCHANT_KEY: "k" }, "merchant")).toEqual([]);
   });
+
+  test("associating the Achala token needs ACHALA_TOKEN_ID (umina-achala-chain#26)", () => {
+    const buyer = { ...base, BUYER_ID: "0.0.6", BUYER_KEY: "k" };
+    expect(roleProblems(buyer, "buyer", "achala")).toEqual(["ACHALA_TOKEN_ID is not set"]);
+    expect(roleProblems({ ...buyer, ACHALA_TOKEN_ID: "0.0.8" }, "buyer", "achala")).toEqual([]);
+  });
 });
 
 describe("consignmentSplit", () => {

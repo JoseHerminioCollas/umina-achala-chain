@@ -15,6 +15,7 @@ import { parseArgs } from "util";
 import { PublicKey } from "@hashgraph/sdk";
 import { normalizeTxId } from "../mirror.js";
 import { submitKeyProblem } from "../hcs.js";
+import { TOKEN_CLASSES, tokenClassProblem } from "../token/lib.js";
 
 const ACCOUNT_ID = /^0\.0\.\d+$/;
 const TOKEN_ID = /^0\.0\.\d+$/;
@@ -28,6 +29,7 @@ export const METHODS = ["in_person"];
 
 const OPTIONS = {
   "dry-run": { type: "boolean" },
+  token: { type: "string" },
   "stone-id": { type: "string" },
   seller: { type: "string" },
   buyer: { type: "string" },
@@ -63,11 +65,19 @@ export function parseRecordArgs(argv) {
   }
   const [command, serial] = positionals;
   const problems = [];
-  const input = { command, serial, dryRun: Boolean(values["dry-run"]), stoneId: values["stone-id"] };
+  const input = {
+    command,
+    serial,
+    dryRun: Boolean(values["dry-run"]),
+    stoneId: values["stone-id"],
+    tokenClass: values.token ?? "umina",
+  };
 
   if (!COMMANDS.includes(command)) {
     return { ...input, problems: [`give the event: ${COMMANDS.join(" or ")}`] };
   }
+  const tokenProblem = tokenClassProblem(input.tokenClass);
+  if (tokenProblem) problems.push(tokenProblem);
   if (!/^[1-9]\d*$/.test(serial ?? "")) {
     problems.push("give the NFT serial number as a positive integer");
   }
@@ -136,13 +146,20 @@ export function parseRecordArgs(argv) {
   return { ...input, problems };
 }
 
-/** Lists the problems with the environment recordEvent.js needs. */
-export function recordEnvProblems(env) {
-  const problems = ["OPERATOR_ID", "OPERATOR_KEY", "UMINA_TOKEN_ID", "HCS_TOPIC_ID"]
+/**
+ * Lists the problems with the environment recordEvent.js needs. An Achala
+ * also needs UMINA_TOKEN_ID, to check the stones that moved with it.
+ */
+export function recordEnvProblems(env, tokenClass = "umina") {
+  const tokens = [TOKEN_CLASSES[tokenClass].envVar];
+  if (tokenClass === "achala") tokens.push("UMINA_TOKEN_ID");
+  const problems = ["OPERATOR_ID", "OPERATOR_KEY", ...tokens, "HCS_TOPIC_ID"]
     .filter((k) => !env[k])
     .map((k) => `${k} is not set`);
-  if (env.UMINA_TOKEN_ID && !TOKEN_ID.test(env.UMINA_TOKEN_ID)) {
-    problems.push(`UMINA_TOKEN_ID must look like 0.0.1234, got "${env.UMINA_TOKEN_ID}"`);
+  for (const name of tokens) {
+    if (env[name] && !TOKEN_ID.test(env[name])) {
+      problems.push(`${name} must look like 0.0.1234, got "${env[name]}"`);
+    }
   }
   const submitProblem = submitKeyProblem(env);
   if (submitProblem) problems.push(submitProblem);
@@ -178,26 +195,33 @@ export function hbarToTinybars(amount) {
  * Checks a sale against the ledger: the NFT transaction moved this serial
  * from the seller to the buyer, and for on_chain payments, the buyer paid
  * (in the NFT transaction, or in the separate payment transaction) and the
- * seller received HBAR, matching --sold-for when it is given.
+ * seller received HBAR, matching --sold-for when it is given. alsoMoved lists
+ * NFTs that must have moved from the seller to the buyer in the same
+ * transaction: the Umiña stones of an Achala (umina-achala-chain#26).
+ * @param {Array<{ tokenId: string, serial: string, stoneId?: string }>} [alsoMoved]
  * @returns {string[]} problems, empty when the ledger agrees
  */
-export function saleLedgerProblems(input, tokenId, nftRecord, paymentRecord) {
+export function saleLedgerProblems(input, tokenId, nftRecord, paymentRecord, alsoMoved = []) {
   const problems = [];
   if (!nftRecord) return [`the mirror node does not know --nft-tx ${input.nftTx}`];
   if (nftRecord.result !== "SUCCESS") {
     return [`--nft-tx ${input.nftTx} did not succeed (${nftRecord.result})`];
   }
-  const moved = (nftRecord.nft_transfers ?? []).some(
-    (t) =>
-      t.token_id === tokenId &&
-      String(t.serial_number) === String(input.serial) &&
-      t.sender_account_id === input.seller &&
-      t.receiver_account_id === input.buyer,
-  );
-  if (!moved) {
-    problems.push(
-      `--nft-tx ${input.nftTx} did not move ${tokenId} serial ${input.serial} from ${input.seller} to ${input.buyer}`,
+  const moved = (token, serial) =>
+    (nftRecord.nft_transfers ?? []).some(
+      (t) =>
+        t.token_id === String(token) &&
+        String(t.serial_number) === String(serial) &&
+        t.sender_account_id === input.seller &&
+        t.receiver_account_id === input.buyer,
     );
+  for (const nft of [{ tokenId, serial: input.serial }, ...alsoMoved]) {
+    if (!moved(nft.tokenId, nft.serial)) {
+      const what = nft.stoneId ? ` (${nft.stoneId}, in the Achala)` : "";
+      problems.push(
+        `--nft-tx ${input.nftTx} did not move ${nft.tokenId} serial ${nft.serial}${what} from ${input.seller} to ${input.buyer}`,
+      );
+    }
   }
   if (input.payment !== "on_chain") return problems;
 

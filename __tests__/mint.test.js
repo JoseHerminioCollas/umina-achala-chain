@@ -17,7 +17,17 @@ import {
   withPlaceholderAssets,
 } from "../src/mint/lib.js";
 import { buildEvent, MAX_MESSAGE_BYTES } from "../src/hcs.js";
-import { mountedStones, uminaTokenProblem, withUminaTokenId } from "../src/mint/achala.js";
+import {
+  achalaSaleFields,
+  achalaSalePlan,
+  isBurned,
+  MAX_NFT_TRANSFERS,
+  mintOfSerial,
+  mountedProblem,
+  mountedStones,
+  uminaTokenProblem,
+  withUminaTokenId,
+} from "../src/mint/achala.js";
 
 const key = PrivateKey.generateECDSA().toStringDer();
 
@@ -311,8 +321,8 @@ describe("minting an Achala (umina-achala-chain#16)", () => {
     expect([...mountedStones(events, "0.0.4004").keys()]).toEqual(["UMINA-2026-CH-01", "UMINA-2026-AU-01"]);
   });
 
-  test("the largest Achala MINT (10 stones) fits in one HCS message", () => {
-    const ids = Array.from({ length: 10 }, (_, i) => `UMINA-2026-CH-${String(i).padStart(4, "0")}`);
+  test("the largest Achala MINT (9 stones) fits in one HCS message", () => {
+    const ids = Array.from({ length: 9 }, (_, i) => `UMINA-2026-CH-${String(i).padStart(4, "0")}`);
     const envelope = {
       event: "MINT",
       stoneId: "ACHALA-2026-RI-0001",
@@ -323,5 +333,91 @@ describe("minting an Achala (umina-achala-chain#16)", () => {
     };
     const message = buildEvent(envelope, { ipfs_cid: "bafkrei" + "a".repeat(52), from_stone_ids: ids });
     expect(Buffer.byteLength(JSON.stringify(message))).toBeLessThan(MAX_MESSAGE_BYTES);
+  });
+});
+
+describe("mounted stones and Achala sales (umina-achala-chain#24, #26)", () => {
+  const U = "0.0.2002";
+  const A = "0.0.4004";
+  const ev = (event) => ({ event });
+  const stoneMint = (id, serial) => ev({ event: "MINT", stone_id: id, token_id: U, serials: [serial] });
+  const achalaMint = (id, serial, stones) =>
+    ev({ event: "MINT", stone_id: id, token_id: A, serials: [serial], from_stone_ids: stones });
+  const events = [
+    stoneMint("UMINA-2026-CH-03", "3"),
+    stoneMint("UMINA-2026-AU-01", "4"),
+    stoneMint("UMINA-2026-CH-05", "5"),
+    achalaMint("ACHALA-2026-RI-01", "1", ["UMINA-2026-CH-03", "UMINA-2026-AU-01"]),
+  ].map((e, i) => ({ ...e, sequence_number: i + 1 }));
+  const ids = (serial) => ({ uminaTokenId: U, achalaTokenId: A, serial });
+
+  test("mintOfSerial and isBurned find a serial's MINT and BURN", () => {
+    expect(mintOfSerial(events, U, 4).event.stone_id).toBe("UMINA-2026-AU-01");
+    expect(mintOfSerial(events, A, "4")).toBeUndefined();
+    expect(isBurned(events, A, "1")).toBe(false);
+    expect(isBurned([...events, ev({ event: "BURN", token_id: A, serials: ["1"] })], A, 1)).toBe(true);
+  });
+
+  test("mountedProblem names the Achala a stone is in, and is null for a free stone", () => {
+    expect(mountedProblem(events, ids("3"))).toBe(
+      "UMINA-2026-CH-03 (0.0.2002/3) is mounted in Achala ACHALA-2026-RI-01 (0.0.4004/1, MINT #4): " +
+        "it moves only with its Achala, and is freed when the Achala is burned",
+    );
+    expect(mountedProblem(events, ids("5"))).toBeNull();
+    expect(mountedProblem(events, ids("99"))).toBeNull();
+  });
+
+  test("mountedProblem frees the stones of a burned Achala, and checks nothing without an Achala token", () => {
+    const burned = [...events, ev({ event: "BURN", token_id: A, serials: ["1"] })];
+    expect(mountedProblem(burned, ids("3"))).toBeNull();
+    expect(mountedProblem(events, { ...ids("3"), achalaTokenId: undefined })).toBeNull();
+  });
+
+  test("achalaSalePlan lists the Achala's stones with their Umiña serials", () => {
+    expect(achalaSalePlan(events, ids("1"))).toEqual({
+      achalaId: "ACHALA-2026-RI-01",
+      stones: [
+        { stone_id: "UMINA-2026-CH-03", serial: "3" },
+        { stone_id: "UMINA-2026-AU-01", serial: "4" },
+      ],
+      problems: [],
+    });
+    expect(achalaSaleFields(achalaSalePlan(events, ids("1")).stones, U)).toEqual({
+      from_stone_ids: ["UMINA-2026-CH-03", "UMINA-2026-AU-01"],
+      umina_token_id: "0.0.2002",
+      umina_serials: ["3", "4"],
+    });
+  });
+
+  test.each([
+    ["was never minted", events, "2", "Achala 0.0.4004/2 has no MINT event on the topic"],
+    [
+      "is burned",
+      [...events, ev({ event: "BURN", token_id: A, serials: ["1"] })],
+      "1",
+      "Achala 0.0.4004/1 is burned (the piece was taken apart)",
+    ],
+    [
+      "has a stone with no MINT",
+      [...events, achalaMint("ACHALA-2026-PE-02", "2", ["UMINA-2026-CH-09"])],
+      "2",
+      "UMINA-2026-CH-09 has no MINT event in the Umiña token 0.0.2002",
+    ],
+    [
+      "has a stone minted twice",
+      [...events, stoneMint("UMINA-2026-CH-05", "6"), achalaMint("ACHALA-2026-PE-02", "2", ["UMINA-2026-CH-05"])],
+      "2",
+      "UMINA-2026-CH-05 was minted 2 times; sell this Achala by hand",
+    ],
+  ])("achalaSalePlan refuses an Achala that %s", (_, list, serial, problem) => {
+    expect(achalaSalePlan(list, ids(serial)).problems).toEqual([problem]);
+  });
+
+  test("achalaSalePlan refuses a piece over the NFT transfer limit", () => {
+    const many = Array.from({ length: MAX_NFT_TRANSFERS }, (_, i) => `UMINA-2026-CH-${10 + i}`);
+    const list = [...many.map((id, i) => stoneMint(id, String(10 + i))), achalaMint("ACHALA-2026-NE-01", "9", many)];
+    expect(achalaSalePlan(list, ids("9")).problems).toEqual([
+      "Achala 0.0.4004/9 has 10 stones: one transfer moves at most 10 NFTs, the Achala and 9 stones",
+    ]);
   });
 });

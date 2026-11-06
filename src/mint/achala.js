@@ -210,3 +210,101 @@ export function achalaComplianceFields(properties) {
     from_stone_ids: properties.stones.map((s) => s.stone_id),
   };
 }
+
+/**
+ * Hedera's limit on NFT transfers in one transaction (ledger.nftTransfers.maxLen
+ * on mainnet and testnet). An Achala is sold with its stones in one atomic
+ * transfer, so it has at most this many NFTs: the Achala and 9 stones. To
+ * verify on testnet (umina-achala-chain#26).
+ */
+export const MAX_NFT_TRANSFERS = 10;
+
+/** The MINT event of a serial of a token, or undefined. */
+export function mintOfSerial(events, tokenId, serial) {
+  return events.find(
+    ({ event }) =>
+      event.event === "MINT" &&
+      event.token_id === String(tokenId) &&
+      (event.serials ?? []).map(String).includes(String(serial)),
+  );
+}
+
+/** True when a BURN event names this serial of this token. */
+export function isBurned(events, tokenId, serial) {
+  return events.some(
+    ({ event }) =>
+      event.event === "BURN" &&
+      event.token_id === String(tokenId) &&
+      (event.serials ?? []).map(String).includes(String(serial)),
+  );
+}
+
+/**
+ * A problem when an Umiña serial is mounted in an Achala that still exists,
+ * or null (umina-achala-chain#24). Such a stone is sold, consigned or burned
+ * only with its Achala; burning the Achala frees it. Without an Achala token
+ * (ACHALA_TOKEN_ID not set) nothing can be mounted.
+ */
+export function mountedProblem(events, { uminaTokenId, achalaTokenId, serial }) {
+  if (!achalaTokenId) return null;
+  const mint = mintOfSerial(events, uminaTokenId, serial);
+  if (!mint) return null;
+  const achala = mountedStones(events, achalaTokenId).get(mint.event.stone_id);
+  if (!achala) return null;
+  const { stone_id: achalaId, serials } = achala.event;
+  return (
+    `${mint.event.stone_id} (${uminaTokenId}/${serial}) is mounted in Achala ${achalaId} ` +
+    `(${achalaTokenId}/${serials.join(",")}, MINT #${achala.sequence_number}): it moves only with its Achala, ` +
+    `and is freed when the Achala is burned`
+  );
+}
+
+/**
+ * What an Achala sale moves, from the provenance topic: the Achala's own
+ * MINT (its stone_id and from_stone_ids) and each stone's Umiña serial, from
+ * the stone's MINT (umina-achala-chain#26). Refuses an Achala that was never
+ * minted or is burned, a stone with no MINT or minted more than once (its
+ * serial would be a guess), and a piece over MAX_NFT_TRANSFERS.
+ * @returns {{ achalaId?: string, stones?: Array<{ stone_id: string, serial: string }>, problems: string[] }}
+ */
+export function achalaSalePlan(events, { uminaTokenId, achalaTokenId, serial }) {
+  const nft = `${achalaTokenId}/${serial}`;
+  const mint = mintOfSerial(events, achalaTokenId, serial);
+  if (!mint) return { problems: [`Achala ${nft} has no MINT event on the topic`] };
+  if (isBurned(events, achalaTokenId, serial)) {
+    return { problems: [`Achala ${nft} is burned (the piece was taken apart)`] };
+  }
+  const problems = [];
+  const stones = [];
+  for (const stoneId of mint.event.from_stone_ids ?? []) {
+    const mints = events.filter(
+      ({ event }) =>
+        event.event === "MINT" && event.stone_id === stoneId && event.token_id === String(uminaTokenId),
+    );
+    if (mints.length !== 1) {
+      problems.push(
+        mints.length
+          ? `${stoneId} was minted ${mints.length} times; sell this Achala by hand`
+          : `${stoneId} has no MINT event in the Umiña token ${uminaTokenId}`,
+      );
+      continue;
+    }
+    stones.push({ stone_id: stoneId, serial: String(mints[0].event.serials[0]) });
+  }
+  if (!stones.length && !problems.length) problems.push(`Achala ${nft} lists no stones in its MINT`);
+  if (stones.length + 1 > MAX_NFT_TRANSFERS) {
+    problems.push(
+      `Achala ${nft} has ${stones.length} stones: one transfer moves at most ${MAX_NFT_TRANSFERS} NFTs, the Achala and ${MAX_NFT_TRANSFERS - 1} stones`,
+    );
+  }
+  return { achalaId: mint.event.stone_id, stones, problems };
+}
+
+/** The fields a SALE of an Achala adds: its stones and their Umiña serials. */
+export function achalaSaleFields(stones, uminaTokenId) {
+  return {
+    from_stone_ids: stones.map((s) => s.stone_id),
+    umina_token_id: String(uminaTokenId),
+    umina_serials: stones.map((s) => String(s.serial)),
+  };
+}

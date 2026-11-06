@@ -1,4 +1,5 @@
 import { jest } from "@jest/globals";
+import { mockMirror, restoreMirror } from "../testHelpers/mockMirror.js";
 import { PrivateKey, Status } from "@hashgraph/sdk";
 
 // Runs src/consignment/consignToMerchant.js itself (it calls main() on import)
@@ -49,7 +50,8 @@ function mockTransaction(name, { executeError, receiptError } = {}) {
   });
 }
 
-function mockDependencies({ alreadyAssociated = false, transferError, approveError, hcsReceiptError } = {}) {
+function mockDependencies({ alreadyAssociated = false, transferError, approveError, hcsReceiptError, topicEvents = [] } = {}) {
+  calls.mirror = mockMirror(topicEvents);
   calls.steps = [];
   calls.close = jest.fn();
   calls.forTestnet = jest.fn(() => ({ setOperator: jest.fn().mockReturnThis(), close: calls.close }));
@@ -105,6 +107,7 @@ describe("consignToMerchant.js", () => {
   });
 
   afterEach(() => {
+    restoreMirror();
     process.env = { ...env };
     process.argv = [...argv];
     process.exitCode = undefined;
@@ -260,5 +263,29 @@ describe("consignToMerchant.js", () => {
 
     expect(console.error).toHaveBeenCalledWith("   - HCS_TOPIC_ID is not set");
     expect(calls.steps).toEqual([]);
+  });
+
+  // --- Mounted stones (umina-achala-chain#24) ---
+  test.each([[[]], [["--dry-run"]]])("refuses to consign an Umiña mounted in an Achala %j", async (extra) => {
+    process.env.ACHALA_TOKEN_ID = "0.0.8008";
+    mockDependencies({ topicEvents: [
+    { event: "MINT", stone_id: "UMINA-2026-CH-07", token_id: "0.0.2002", serials: ["7"] },
+    { event: "MINT", stone_id: "ACHALA-2026-RI-01", token_id: "0.0.8008", serials: ["1"], from_stone_ids: ["UMINA-2026-CH-07"] },
+  ] });
+    await runScript("7", ...extra);
+
+    expect(console.error).toHaveBeenCalledWith(
+      "❌ UMINA-2026-CH-07 (0.0.2002/7) is mounted in Achala ACHALA-2026-RI-01 (0.0.8008/1, MINT #2): " +
+        "it moves only with its Achala, and is freed when the Achala is burned",
+    );
+    expect(calls.steps).toEqual([]);
+    expect(process.exitCode).toBe(1);
+  });
+
+  test("reads the provenance topic first, also on --dry-run", async () => {
+    mockDependencies();
+    await runScript("7", "--dry-run");
+
+    expect(calls.mirror[0]).toBe("https://testnet.mirrornode.hedera.com/api/v1/topics/0.0.3003");
   });
 });
