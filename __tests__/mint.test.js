@@ -17,7 +17,7 @@ import {
   withPlaceholderAssets,
 } from "../src/mint/lib.js";
 import { buildEvent, MAX_MESSAGE_BYTES } from "../src/hcs.js";
-import { mountedEvent, mountedStones, uminaTokenProblem, withUminaTokenId } from "../src/mint/achala.js";
+import { mountedStones, uminaTokenProblem, withUminaTokenId } from "../src/mint/achala.js";
 
 const key = PrivateKey.generateECDSA().toStringDer();
 
@@ -297,20 +297,21 @@ describe("minting an Achala (umina-achala-chain#16)", () => {
     );
   });
 
-  test("mountedStones ignores other tokens and Achalas that were burned", () => {
-    const mounted = (serial, id, token = "0.0.4004") => ({
-      event: { event: "TRANSFORMATION", kind: "mounted", from_stone_ids: [id], to_token_id: token, to_serial: serial },
+  test("mountedStones reads the Achalas' MINT events, ignoring other tokens and burned Achalas", () => {
+    const mint = (serial, ids, token = "0.0.4004") => ({
+      event: { event: "MINT", stone_id: `ACHALA-2026-RI-0${serial}`, token_id: token, serials: [serial], from_stone_ids: ids },
     });
     const events = [
-      mounted("1", "UMINA-2026-CH-01"),
-      mounted("2", "UMINA-2026-CH-02"),
-      mounted("3", "UMINA-2026-CH-03", "0.0.9999"),
+      mint("1", ["UMINA-2026-CH-01", "UMINA-2026-AU-01"]),
+      mint("2", ["UMINA-2026-CH-02"]),
+      mint("3", ["UMINA-2026-CH-03"], "0.0.9999"),
+      { event: { event: "COMPLIANCE", token_id: "0.0.4004", serials: [], from_stone_ids: ["UMINA-2026-CH-04"] } },
       { event: { event: "BURN", token_id: "0.0.4004", serials: ["2"] } },
     ];
-    expect([...mountedStones(events, "0.0.4004").keys()]).toEqual(["UMINA-2026-CH-01"]);
+    expect([...mountedStones(events, "0.0.4004").keys()]).toEqual(["UMINA-2026-CH-01", "UMINA-2026-AU-01"]);
   });
 
-  test("the largest MINT (10 stones) and a TRANSFORMATION fit in one HCS message", () => {
+  test("the largest Achala MINT (10 stones) fits in one HCS message", () => {
     const ids = Array.from({ length: 10 }, (_, i) => `UMINA-2026-CH-${String(i).padStart(4, "0")}`);
     const envelope = {
       event: "MINT",
@@ -322,15 +323,5 @@ describe("minting an Achala (umina-achala-chain#16)", () => {
     };
     const message = buildEvent(envelope, { ipfs_cid: "bafkrei" + "a".repeat(52), from_stone_ids: ids });
     expect(Buffer.byteLength(JSON.stringify(message))).toBeLessThan(MAX_MESSAGE_BYTES);
-    const stone = { serial: 123456, stone_id: ids[0] };
-    const [env, fields] = mountedEvent(stone, {
-      uminaTokenId: "0.0.12345678",
-      achalaId: envelope.stoneId,
-      achalaTokenId: "0.0.12345678",
-      achalaSerial: "123456",
-      actorId: "0.0.12345678",
-      mintTxId: envelope.ref,
-    });
-    expect(() => buildEvent(env, fields)).not.toThrow();
   });
 });

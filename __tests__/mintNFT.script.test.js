@@ -19,7 +19,6 @@ function mockDependencies({
   mirrorStatus = 200,
   topicEvents = [],
   nfts = {},
-  transformationError,
 } = {}) {
   calls.order = [];
   calls.messages = [];
@@ -68,15 +67,6 @@ function mockDependencies({
         sign: jest.fn(async (k) => (calls.hcs.signed.push(k.publicKey.toString()), tx)),
         execute: jest.fn(async () => {
           calls.messages.push(calls.hcs.message);
-          // An Achala's TRANSFORMATION events, after MINT
-          if (calls.hcs.message.event === "TRANSFORMATION") {
-            calls.order.push("transformation");
-            if (transformationError) throw transformationError;
-            return {
-              transactionId: { toString: () => "0.0.1@1700000000.2" },
-              getReceipt: async () => ({ status: "SUCCESS" }),
-            };
-          }
           // The COMPLIANCE event before pinning is recorded apart from MINT,
           // and the hcs errors apply to MINT only
           if (calls.hcs.message.event === "COMPLIANCE") {
@@ -867,7 +857,7 @@ describe("mintNFT.js", () => {
     Object.assign(process.env, { ACHALA_TOKEN_ID: "0.0.4004", TREASURY_ID: "0.0.1001" });
   }
 
-  test("--token achala checks the stones, mints under ACHALA_TOKEN_ID, records MINT and a TRANSFORMATION per stone", async () => {
+  test("--token achala checks the stones, mints under ACHALA_TOKEN_ID, records MINT with its stones and no stone events", async () => {
     achalaEnv();
     mockDependencies({ topicEvents: stoneEvents });
     await runScript(writeAchala(), "--token", "achala");
@@ -878,10 +868,10 @@ describe("mintNFT.js", () => {
         "https://testnet.mirrornode.hedera.com/api/v1/tokens/0.0.2002/nfts/4",
       ]),
     );
-    expect(calls.order).toEqual(["compliance", "pinFile", "pinFile", "pin", "mint", "hcs", "transformation", "transformation"]);
+    expect(calls.order).toEqual(["compliance", "pinFile", "pinFile", "pin", "mint", "hcs"]);
     expect(calls.mint.tokenId).toBe("0.0.4004");
 
-    const [compliance, mint, ...mounted] = calls.messages;
+    const [compliance, mint, ...others] = calls.messages;
     expect(compliance).toMatchObject({
       event: "COMPLIANCE",
       stone_id: "ACHALA-2026-RI-01",
@@ -898,21 +888,7 @@ describe("mintNFT.js", () => {
       ipfs_cid: "QmMockCID12345",
       from_stone_ids: ["UMINA-2026-CH-03", "UMINA-2026-AU-01"],
     });
-    expect(mounted).toEqual([
-      expect.objectContaining({
-        event: "TRANSFORMATION",
-        stone_id: "UMINA-2026-CH-03",
-        token_id: "0.0.2002",
-        serials: ["3"],
-        ref: "0.0.1001@1700000000.0",
-        kind: "mounted",
-        from_stone_ids: ["UMINA-2026-CH-03"],
-        to_stone_id: "ACHALA-2026-RI-01",
-        to_token_id: "0.0.4004",
-        to_serial: "7",
-      }),
-      expect.objectContaining({ stone_id: "UMINA-2026-AU-01", serials: ["4"], to_serial: "7" }),
-    ]);
+    expect(others).toEqual([]);
     expect(process.exitCode).toBeUndefined();
   });
 
@@ -940,10 +916,10 @@ describe("mintNFT.js", () => {
       {
         topicEvents: [
           ...stoneEvents,
-          { event: "TRANSFORMATION", kind: "mounted", from_stone_ids: ["UMINA-2026-CH-03"], to_token_id: "0.0.4004", to_serial: "2", serials: ["3"] },
+          { event: "MINT", stone_id: "ACHALA-2026-RI-02", token_id: "0.0.4004", serials: ["2"], from_stone_ids: ["UMINA-2026-CH-03"] },
         ],
       },
-      "UMINA-2026-CH-03 is already mounted in Achala 0.0.4004/2 (TRANSFORMATION #5)",
+      "UMINA-2026-CH-03 is already mounted in Achala ACHALA-2026-RI-02 (0.0.4004/2, MINT #5)",
     ],
   ])("refuses a stone that %s, and sends nothing", async (_, options, problem) => {
     achalaEnv();
@@ -960,7 +936,7 @@ describe("mintNFT.js", () => {
     mockDependencies({
       topicEvents: [
         ...stoneEvents,
-        { event: "TRANSFORMATION", kind: "mounted", from_stone_ids: ["UMINA-2026-CH-03"], to_token_id: "0.0.4004", to_serial: "2", serials: ["3"] },
+        { event: "MINT", stone_id: "ACHALA-2026-RI-02", token_id: "0.0.4004", serials: ["2"], from_stone_ids: ["UMINA-2026-CH-03"] },
         { event: "BURN", token_id: "0.0.4004", serials: ["2"], reason: "Piece disassembled" },
       ],
     });
@@ -1044,14 +1020,13 @@ describe("mintNFT.js", () => {
     expect(process.exitCode).toBe(1);
   });
 
-  test("lists the stones still without TRANSFORMATION when one fails", async () => {
+  test("a failed Achala MINT event says its stones are not recorded as mounted", async () => {
     achalaEnv();
-    mockDependencies({ topicEvents: stoneEvents, transformationError: new Error("INVALID_SIGNATURE") });
+    mockDependencies({ topicEvents: stoneEvents, hcsError: new Error("INVALID_SIGNATURE") });
     await runScript(writeAchala(), "--token", "achala");
 
     expect(console.error).toHaveBeenCalledWith(
-      "❌ Minted ACHALA-2026-RI-01 (serial 7) and recorded MINT, but TRANSFORMATION failed; still to record for: UMINA-2026-CH-03, UMINA-2026-AU-01",
-      expect.any(Error),
+      "   Without its MINT event the Achala's stones are not recorded as mounted: UMINA-2026-CH-03, UMINA-2026-AU-01.",
     );
     expect(process.exitCode).toBe(1);
   });
@@ -1077,11 +1052,11 @@ describe("mintNFT.js", () => {
     expect(properties.stones).toEqual([{ serial: 3, stone_id: "UMINA-2026-CH-03" }]);
     const generated = JSON.parse(fs.readFileSync(path.join(dir, "generated", "ACHALA-2026-PE-99.json"), "utf8"));
     expect(generated.properties.umina_token_id).toBe("0.0.2002");
-    expect(calls.order).toEqual(["compliance", "pinFile", "pinFile", "pin", "mint", "hcs", "transformation"]);
+    expect(calls.order).toEqual(["compliance", "pinFile", "pinFile", "pin", "mint", "hcs"]);
     expect(process.exitCode).toBeUndefined();
   });
 
-  test("an Umiña mint records no TRANSFORMATION and reads no NFT", async () => {
+  test("an Umiña mint records no from_stone_ids and reads no NFT", async () => {
     mockDependencies();
     await runScript(writeMetadata());
 

@@ -2,12 +2,13 @@
  * @file mint/achala.js
  * @description What minting an Achala needs beyond an Umiña mint
  * (umina-achala-chain#16). An Achala is a piece of jewelry made of one or
- * more Umiña NFTs, listed in properties.stones. The Umiña NFTs stay in the
- * UA treasury, associated with the Achala: the Achala's MINT event lists
- * them, and each one gets a TRANSFORMATION event (kind "mounted") naming the
- * Achala. When a piece is taken apart, its Achala NFT is burned
- * (adminToken.js burn --token achala); a stone whose Achala was burned can
- * be mounted again.
+ * more Umiña NFTs, listed in properties.stones. The Achala's own HCS events
+ * record its stones; the stones get no events of their own: the Achala's
+ * MINT event lists them (from_stone_ids), which mounts them, and when the
+ * piece is taken apart its Achala NFT is burned (adminToken.js burn or wipe
+ * --token achala), whose BURN event unmounts them. The Umiña NFTs are never
+ * burned with it, and a stone whose Achala was burned can be mounted again.
+ * The buyer of an Achala gets it and each Umiña in it.
  *
  * A stone can be gold: a gold nugget is a stone, so it can be an Umiña, and
  * a gold piece is either an Umiña itself or an Achala made of a gold Umiña.
@@ -88,8 +89,9 @@ export function achalaProblems(properties = {}, files = [], types = STONE_TYPES)
 
 /**
  * The stones mounted in an Achala that still exists: stone_id → the
- * TRANSFORMATION event, from a topic's events. An Achala with a BURN event
- * (taken apart) frees its stones.
+ * Achala's MINT event, from a topic's events. An Achala's MINT lists its
+ * stones in from_stone_ids; a BURN of that Achala serial (taken apart)
+ * frees them.
  */
 export function mountedStones(events, achalaTokenId) {
   const burned = new Set(
@@ -101,10 +103,9 @@ export function mountedStones(events, achalaTokenId) {
   for (const entry of events) {
     const { event } = entry;
     if (
-      event.event === "TRANSFORMATION" &&
-      event.kind === "mounted" &&
-      event.to_token_id === String(achalaTokenId) &&
-      !burned.has(String(event.to_serial))
+      event.event === "MINT" &&
+      event.token_id === String(achalaTokenId) &&
+      !(event.serials ?? []).some((serial) => burned.has(String(serial)))
     ) {
       for (const id of event.from_stone_ids ?? []) mounted.set(id, entry);
     }
@@ -145,7 +146,7 @@ export function stoneLedgerProblems(stones, nfts, events, { uminaTokenId, achala
     const earlier = mounted.get(stone.stone_id);
     if (earlier) {
       problems.push(
-        `${stone.stone_id} is already mounted in Achala ${achalaTokenId}/${earlier.event.to_serial} (TRANSFORMATION #${earlier.sequence_number})`,
+        `${stone.stone_id} is already mounted in Achala ${earlier.event.stone_id} (${achalaTokenId}/${earlier.event.serials.join(",")}, MINT #${earlier.sequence_number})`,
       );
     }
   });
@@ -208,28 +209,4 @@ export function achalaComplianceFields(properties) {
     hs_code: properties.hs_code,
     from_stone_ids: properties.stones.map((s) => s.stone_id),
   };
-}
-
-/**
- * The TRANSFORMATION event of one stone mounted in a newly minted Achala, as
- * the envelope and the fields for buildEvent.
- */
-export function mountedEvent(stone, { uminaTokenId, achalaId, achalaTokenId, achalaSerial, actorId, mintTxId }) {
-  return [
-    {
-      event: "TRANSFORMATION",
-      stoneId: stone.stone_id,
-      tokenId: uminaTokenId,
-      serials: [stone.serial],
-      actorId,
-      ref: mintTxId,
-    },
-    {
-      kind: "mounted",
-      from_stone_ids: [stone.stone_id],
-      to_stone_id: achalaId,
-      to_token_id: String(achalaTokenId),
-      to_serial: String(achalaSerial),
-    },
-  ];
 }

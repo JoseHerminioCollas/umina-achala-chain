@@ -51,9 +51,9 @@
  * Artisan). If the run fails after pinning, the CIDs pinned so far are
  * printed so they can be unpinned in Pinata.
  *
- * After the MINT event, each stone of an Achala gets a TRANSFORMATION event
- * (kind "mounted") naming the Achala. If one fails, the stones still missing
- * it are printed.
+ * An Achala's MINT event lists its stones (from_stone_ids): that records
+ * them as mounted. The stones get no events of their own; the Achala's BURN,
+ * when the piece is taken apart, unmounts them.
  *
  * ## Output
  * - IPFS CID of pinned metadata
@@ -87,7 +87,6 @@ import { metadataFromForm, writeGeneratedMetadata } from "./formPost.js";
 import { withStoneTypeAttributes } from "./stoneTypes.js";
 import {
   achalaComplianceFields,
-  mountedEvent,
   stoneLedgerProblems,
   stoneTypesFromEvents,
   uminaTokenProblem,
@@ -381,39 +380,12 @@ async function main() {
         err,
       );
       if (isAchala) {
-        console.error(`   No TRANSFORMATION was recorded either, for ${stones.map((s) => s.stone_id).join(", ")}.`);
+        console.error(
+          `   Without its MINT event the Achala's stones are not recorded as mounted: ${stones.map((s) => s.stone_id).join(", ")}.`,
+        );
       }
       process.exitCode = 1;
       return;
-    }
-
-    // --- 5b. An Achala: each stone gets a TRANSFORMATION event naming it ---
-    for (const [i, stone] of stones.entries()) {
-      try {
-        const [envelope, fields] = mountedEvent(stone, {
-          uminaTokenId: process.env.UMINA_TOKEN_ID,
-          achalaId: stoneId,
-          achalaTokenId: tokenId,
-          achalaSerial: serials[0],
-          actorId: operatorId,
-          mintTxId,
-        });
-        const txId = await submitEvent(
-          client,
-          process.env.HCS_TOPIC_ID,
-          buildEvent(envelope, fields),
-          loadSubmitKey(process.env),
-        );
-        console.log(`✅ TRANSFORMATION recorded for ${stone.stone_id}: ${txId}`);
-      } catch (err) {
-        const missing = stones.slice(i).map((s) => s.stone_id).join(", ");
-        console.error(
-          `❌ Minted ${stoneId} (serial ${serials}) and recorded MINT, but TRANSFORMATION failed; still to record for: ${missing}`,
-          err,
-        );
-        process.exitCode = 1;
-        return;
-      }
     }
 
     // --- 6. Provenance logging ---

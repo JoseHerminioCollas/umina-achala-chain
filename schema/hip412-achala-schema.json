@@ -1,6 +1,6 @@
 {
   "title": "Achala Jewelry HIP-412 Metadata",
-  "description": "An Achala is a piece of jewelry made of one or more Umiña NFTs (umina-achala-chain#16). The Umiña NFTs stay in the UA treasury, associated with the Achala by the MINT and TRANSFORMATION events. A gold nugget is a stone, so it can be an Umiña; the gold or silver of a piece comes from one of its Umiña stones or from an invoice in documents.",
+  "description": "An Achala is a piece of jewelry made of one or more Umiña NFTs (umina-achala-chain#16). The Achala's MINT event lists its stones, which mounts them; its BURN, when the piece is taken apart, unmounts them. The stones get no events of their own, and the buyer of an Achala gets it and each Umiña in it. A gold nugget is a stone, so it can be an Umiña; the gold or silver of a piece comes from one of its Umiña stones or from an invoice in documents.",
   "type": "object",
   "required": ["name", "creator", "description", "image", "format", "metadata_version", "properties", "files", "attributes"],
   "properties": {
