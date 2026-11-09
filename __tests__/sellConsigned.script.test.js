@@ -236,4 +236,23 @@ describe("sellConsigned.js", () => {
     expect(calls.forTestnet).not.toHaveBeenCalled();
     expect(calls.steps).toEqual([]);
   });
+  test("refuses a mistyped option and sends nothing (#29)", async () => {
+    mockDependencies();
+    await runScript("7", "100", "--dryrun");
+
+    expect(console.error).toHaveBeenCalledWith(expect.stringContaining("--dryrun"));
+    expect(calls.forTestnet).not.toHaveBeenCalled();
+    expect(calls.steps).toEqual([]);
+    expect(process.exitCode).toBe(1);
+  });
+
+  test("--help prints the usage and sends nothing (#29)", async () => {
+    mockDependencies();
+    jest.spyOn(console, "log").mockImplementation(() => {});
+    await runScript("--help");
+
+    expect(console.log).toHaveBeenCalledWith(expect.stringContaining("node src/consignment/sellConsigned.js <serial> <price-hbar>"));
+    expect(calls.forTestnet).not.toHaveBeenCalled();
+    expect(calls.steps).toEqual([]);
+  });
 });

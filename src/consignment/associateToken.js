@@ -39,6 +39,13 @@ try {
 }
 loadEnv();
 
+const USAGE = `Associate a token with the merchant or buyer test account, so it can receive NFTs.
+
+Usage: node src/consignment/associateToken.js <merchant|buyer> [--token umina|achala] [--dry-run]
+
+  <merchant|buyer>       the account: MERCHANT_ID/KEY or BUYER_ID/KEY
+  --token umina|achala   the token to associate (default umina)`;
+
 runScript("Association failed", async (session) => {
   // --- 1. Check the role and environment ---
   const problems = argProblem ? [argProblem] : roleProblems(process.env, role, tokenClass);
@@ -65,4 +72,4 @@ runScript("Association failed", async (session) => {
       ? `✅ ${role} ${accountId} associated ${tokenId}`
       : `ℹ️  ${role} ${accountId} already associated ${tokenId}`,
   );
-});
+}, { usage: USAGE });

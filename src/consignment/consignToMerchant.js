@@ -31,13 +31,12 @@ import {
 import { associateToken, consignmentProblems } from "./lib.js";
 import { parseEcdsaKey, treasuryKeyProblem } from "../keys.js";
 import { buildEvent, loadSubmitKey, submitEvent, submitKeyProblem } from "../hcs.js";
-import { topicEvents } from "../mirror.js";
-import { mountedProblem } from "../mint/achala.js";
-import { fail, loadEnv, runScript } from "../script.js";
+import { mountedStoneProblem, readProvenance } from "../provenance.js";
+import { fail, loadEnv, parseScriptArgs, runScript } from "../script.js";
 
-const args = process.argv.slice(2);
-const dryRun = args.includes("--dry-run");
-const serial = args.find((a) => !a.startsWith("--"));
+const args = parseScriptArgs({ "dry-run": { type: "boolean" } }, 1);
+const dryRun = Boolean(args.values["dry-run"]);
+const [serial] = args.positionals;
 loadEnv();
 
 const REQUIRED = [
@@ -52,8 +51,17 @@ const REQUIRED = [
 
 let transferTxId;
 
+const USAGE = `Consign an Umiña serial to the merchant: the merchant associates the token,
+the Treasury sends the NFT, the merchant gives UA an allowance, and
+ISSUED_TO_OWNER is recorded. A stone mounted in an Achala is refused.
+
+Usage: node src/consignment/consignToMerchant.js <serial> [--dry-run]
+
+  <serial>   the Umiña NFT serial`;
+
 runScript("Consignment failed", async (session) => {
   // --- 1. Check the arguments and environment ---
+  if (args.problems.length) return fail(args.problems);
   const problems = consignmentProblems(process.env, REQUIRED, serial);
   for (const problem of [treasuryKeyProblem(process.env), submitKeyProblem(process.env)]) {
     if (problem) problems.push(problem);
@@ -71,19 +79,9 @@ runScript("Consignment failed", async (session) => {
     : null;
 
   // A stone in an Achala is consigned only with its Achala (#24)
-  let events;
-  try {
-    events = await topicEvents(process.env.HCS_TOPIC_ID);
-  } catch (err) {
-    console.error(`❌ Cannot read HCS_TOPIC_ID ${process.env.HCS_TOPIC_ID}: ${err.message}`);
-    process.exitCode = 1;
-    return;
-  }
-  const mounted = mountedProblem(events, {
-    uminaTokenId: process.env.UMINA_TOKEN_ID,
-    achalaTokenId: process.env.ACHALA_TOKEN_ID,
-    serial,
-  });
+  const { events, problem } = await readProvenance(process.env);
+  if (problem) return fail([problem]);
+  const mounted = mountedStoneProblem(events, process.env, serial);
   if (mounted) {
     console.error(`❌ ${mounted}`);
     process.exitCode = 1;
@@ -142,10 +140,13 @@ runScript("Consignment failed", async (session) => {
     loadSubmitKey(process.env),
   );
   console.log(`✅ ISSUED_TO_OWNER recorded: ${hcsTxId}`);
-}, () => {
-  if (transferTxId) {
-    console.error(
-      `   The NFT already moved to the merchant in ${transferTxId}, but ISSUED_TO_OWNER was not recorded.`,
-    );
-  }
+}, {
+  usage: USAGE,
+  afterError: () => {
+    if (transferTxId) {
+      console.error(
+        `   The NFT already moved to the merchant in ${transferTxId}, but ISSUED_TO_OWNER was not recorded.`,
+      );
+    }
+  },
 });

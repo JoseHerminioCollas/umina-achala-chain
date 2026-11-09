@@ -34,6 +34,13 @@ const envFile = input.envFile ?? NETWORKS[networkName()]?.envFile;
 const fileProblem = input.problems.length || !envFile ? null : envFileProblem(envFile);
 if (!input.problems.length && !fileProblem) loadEnv(envFile);
 
+const USAGE = `Create an NFT token class with its royalty and role keys.
+
+Usage: node src/token/createToken.js [env-file] [--token umina|achala] [--dry-run]
+
+  [env-file]             default: the network's own; its name must name the network
+  --token umina|achala   the class to create (default umina)`;
+
 runScript(
   "Token creation failed",
   async (session) => {
@@ -63,7 +70,7 @@ runScript(
     // --- 4. Sign & Execute ---
     // The operator signs as fee payer when the transaction executes. The admin
     // key and, when it is a different account, the treasury key sign here.
-    const frozen = await transaction.freezeWith(client);
+    const frozen = transaction.freezeWith(client);
     await frozen.sign(keys.admin);
     if (keys.treasury) await frozen.sign(keys.treasury);
     const response = await frozen.execute(client);
@@ -73,5 +80,9 @@ runScript(
     console.log("-----------------------------------");
     console.log(`SAVE THIS ID IN ${envFile} AS: ${tokenSettings.envVar}`);
   },
-  () => console.error(`   Operator ${process.env.OPERATOR_ID}, treasury ${process.env.TREASURY_ID}`),
+  {
+    usage: USAGE,
+    afterError: () =>
+      console.error(`   Operator ${process.env.OPERATOR_ID}, treasury ${process.env.TREASURY_ID}`),
+  },
 );

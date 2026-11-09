@@ -30,7 +30,7 @@ function mockDependencies({ executeError } = {}) {
   jest.doMock("../src/token/lib.js", () => {
     const actual = jest.requireActual("../src/token/lib.js");
     const tx = {
-      freezeWith: jest.fn(async () => tx),
+      freezeWith: jest.fn(() => tx),
       sign: jest.fn(async (k) => calls.signed.push(k.publicKey.toString())),
       execute: jest.fn(async () => {
         if (executeError) throw executeError;

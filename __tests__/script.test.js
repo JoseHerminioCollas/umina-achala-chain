@@ -85,7 +85,7 @@ describe("script startup (umina-achala-chain#29)", () => {
         session.connect();
         throw new Error("boom");
       },
-      afterError,
+      { afterError },
     );
     expect(console.error).toHaveBeenCalledWith("❌ Sale failed:", expect.any(Error));
     expect(console.error).toHaveBeenCalledWith("   already moved");
@@ -104,5 +104,53 @@ describe("script startup (umina-achala-chain#29)", () => {
       "   - NETWORK=mainnet is not enabled yet: its keys and accounts are not decided (umina-achala-chain#6)",
     );
     expect(process.exitCode).toBe(1);
+  });
+
+  test("--help prints the usage and the common options, runs nothing and reads no env file", async () => {
+    const argv = process.argv;
+    process.argv = ["node", "script.js", "7", "--help"];
+    try {
+      jest.spyOn(console, "log").mockImplementation(() => {});
+      const { loadEnv, runScript } = await load();
+      expect(loadEnv()).toBeUndefined();
+      const body = jest.fn();
+      await runScript("Test failed", body, { usage: "Usage: node script.js <serial>" });
+      expect(body).not.toHaveBeenCalled();
+      expect(calls.dotenv).not.toHaveBeenCalled();
+      const printed = console.log.mock.calls[0][0];
+      expect(printed).toContain("Usage: node script.js <serial>");
+      expect(printed).toContain("-h, --help");
+      expect(printed).toContain("NETWORK=<name>");
+      expect(process.exitCode).toBeUndefined();
+    } finally {
+      process.argv = argv;
+    }
+  });
+});
+
+describe("parseScriptArgs (umina-achala-chain#29)", () => {
+  const options = { "dry-run": { type: "boolean" }, keep: { type: "boolean" } };
+  let parseScriptArgs;
+  beforeAll(async () => {
+    ({ parseScriptArgs } = await load());
+  });
+
+  test("reads the options and arguments it is given", () => {
+    expect(parseScriptArgs(options, 1, ["7", "--dry-run"])).toEqual({
+      values: { "dry-run": true },
+      positionals: ["7"],
+      problems: [],
+    });
+  });
+
+  test("refuses an option the script does not take, so a typo never sends for real", () => {
+    const { problems } = parseScriptArgs(options, 1, ["7", "--dryrun"]);
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toContain("--dryrun");
+    expect(problems[0]).toContain("(see --help)");
+  });
+
+  test("refuses too many arguments", () => {
+    expect(parseScriptArgs(options, 1, ["7", "8"]).problems).toEqual(["too many arguments: 8 (see --help)"]);
   });
 });

@@ -49,6 +49,6 @@ Hedera scripts for Umiña Achala: create the HTS token classes (Umiña for stone
 
 Copy `.env.example` to `.env.testnet` and fill it in. Never commit `.env*` files.
 
-Network: every script runs on the network named by `NETWORK`, set in the shell (testnet when unset), and reads that network's env file (`.env.testnet`) and mirror node (`src/network.js`). Mainnet is listed but not enabled until its keys and accounts are decided (#6). The shared startup (env file, problem output, operator client, closing it) is in `src/script.js`, and the shared environment checks in `src/env.js` (#29). See `umina-achala-documents` for the guides.
+Network: every script runs on the network named by `NETWORK`, set in the shell (testnet when unset), and reads that network's env file (`.env.testnet`) and mirror node (`src/network.js`). Mainnet is listed but not enabled until its keys and accounts are decided (#6). The shared startup (env file, problem output, operator client, closing it) is in `src/script.js`, and the shared environment checks in `src/env.js` (#29). Every script takes `--help` (or `-h`), and refuses an option or argument it does not take, so a mistyped `--dry-run` never sends a real transaction. The provenance topic is read through `src/provenance.js`. See `umina-achala-documents` for the guides.
 
 Tests: `npm install && npm test`.

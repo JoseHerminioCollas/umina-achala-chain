@@ -33,12 +33,12 @@ import {
 import { consignmentProblems } from "./lib.js";
 import { parseEcdsaKey } from "../keys.js";
 import { buildEvent, loadSubmitKey, submitEvent, submitKeyProblem } from "../hcs.js";
-import { fail, loadEnv, runScript } from "../script.js";
+import { fail, loadEnv, parseScriptArgs, runScript } from "../script.js";
 
-const args = process.argv.slice(2);
-const dryRun = args.includes("--dry-run");
-const keep = args.includes("--keep");
-const serial = args.find((a) => !a.startsWith("--"));
+const args = parseScriptArgs({ "dry-run": { type: "boolean" }, keep: { type: "boolean" } }, 1);
+const dryRun = Boolean(args.values["dry-run"]);
+const keep = Boolean(args.values.keep);
+const [serial] = args.positionals;
 loadEnv();
 
 const REQUIRED = [
@@ -53,8 +53,17 @@ const REQUIRED = [
 
 let returnTxId;
 
+const USAGE = `End a consignment: the merchant revokes UA's allowance and returns the NFT to
+the Treasury, recorded as TRANSFER.
+
+Usage: node src/consignment/endConsignment.js <serial> [--keep] [--dry-run]
+
+  <serial>   the Umiña NFT serial
+  --keep     only revoke the allowance; the merchant keeps the NFT`;
+
 runScript("Ending the consignment failed", async (session) => {
   // --- 1. Check the arguments and environment ---
+  if (args.problems.length) return fail(args.problems);
   const problems = consignmentProblems(process.env, REQUIRED, serial);
   const submitProblem = submitKeyProblem(process.env);
   if (submitProblem) problems.push(submitProblem);
@@ -132,10 +141,13 @@ runScript("Ending the consignment failed", async (session) => {
     loadSubmitKey(process.env),
   );
   console.log(`✅ TRANSFER recorded: ${hcsTxId}`);
-}, () => {
-  if (returnTxId) {
-    console.error(
-      `   The NFT already went back to the Treasury in ${returnTxId}, but TRANSFER was not recorded.`,
-    );
-  }
+}, {
+  usage: USAGE,
+  afterError: () => {
+    if (returnTxId) {
+      console.error(
+        `   The NFT already went back to the Treasury in ${returnTxId}, but TRANSFER was not recorded.`,
+      );
+    }
+  },
 });

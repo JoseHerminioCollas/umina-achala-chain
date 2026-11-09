@@ -666,7 +666,7 @@ describe("mintNFT.js", () => {
     await runScript(writeMetadata(), "--force");
 
     expect(console.error).toHaveBeenCalledWith(
-      "❌ Cannot read HCS_TOPIC_ID 0.0.3003: HCS topic 0.0.3003 was not found on the mirror node",
+      "   - cannot read HCS_TOPIC_ID 0.0.3003: HCS topic 0.0.3003 was not found on the mirror node",
     );
     expect(calls.order).toEqual([]);
     expect(process.exitCode).toBe(1);

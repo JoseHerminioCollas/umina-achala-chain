@@ -30,11 +30,12 @@
  * With --form the input is a simulated mint form post (see formPost.js). The
  * metadata file is generated from it, starting from the class's template
  * (json/umina-template.json or json/achala-template.json), into --out (default
- * generated/) and then minted. Otherwise give the path of a metadata file.
- * One of the two is required. properties.stone_id must follow
- * UMINA-YYYY-XX-NN for an Umiña and ACHALA-YYYY-XX-NN for an Achala.
- * Variables come from the network's env file (.env.testnet by default, see src/network.js). --dry-run checks the environment and the
- * metadata and sends nothing, but still writes the generated metadata file.
+ * generated/) and then minted. Otherwise give the path of a metadata file. One
+ * of the two is required. properties.stone_id must follow UMINA-YYYY-XX-NN for
+ * an Umiña and ACHALA-YYYY-XX-NN for an Achala. Variables come from the
+ * network's env file (.env.testnet by default, see src/network.js). --dry-run
+ * checks the environment and the metadata and sends nothing, but still writes
+ * the generated metadata file.
  *
  * Before pinning, a real run reads the HCS topic from the mirror node and
  * refuses a stone_id that already has a MINT event, or a topic that does not
@@ -67,7 +68,8 @@ import fs from "fs";
 import { validateMetadata } from "./metadataValidator.js";
 import { inspectImage, planVersions, writeVersions } from "./images.js";
 import path from "path";
-import { nftInfo, topicEvents } from "../mirror.js";
+import { nftInfo } from "../mirror.js";
+import { readProvenance } from "../provenance.js";
 import {
   buildMetadata,
   checkStoneId,
@@ -117,6 +119,18 @@ function withGeneratedAttributes(metadata, stoneTypeById) {
 }
 
 // Exported so tests can wait for the run to finish (image work is real async work)
+const USAGE = `Mint an Umiña or an Achala: validate the metadata, pin the images and the
+metadata to IPFS, record COMPLIANCE and MINT.
+
+Usage: node src/mint/mintNFT.js <metadata-file | --form post-file> [options]
+
+  <metadata-file>        a metadata JSON file to mint
+  --form <post-file>     a mint form post; the metadata file is generated from it
+  --out <dir>            where --form writes the metadata file (default generated/)
+  --token umina|achala   the token class (default umina)
+  --force                mint even if the stone_id already has a MINT
+  --images-only          make the image versions and stop (no network)`;
+
 export const done = runScript("Unexpected error during minting workflow", async (session) => {
   if (input.problems.length) return fail(input.problems);
   if (!formFile && !metadataFile) {
@@ -224,14 +238,8 @@ export const done = runScript("Unexpected error during minting workflow", async 
   }
 
   // --- 2. Check the HCS topic: it exists, and the item is not minted yet ---
-  let events;
-  try {
-    events = await topicEvents(process.env.HCS_TOPIC_ID);
-  } catch (err) {
-    console.error(`❌ Cannot read HCS_TOPIC_ID ${process.env.HCS_TOPIC_ID}: ${err.message}`);
-    process.exitCode = 1;
-    return;
-  }
+  const { events, problem } = await readProvenance(process.env);
+  if (problem) return fail([problem]);
   const earlier = findMint(events, stoneId);
   if (earlier && !force) {
     console.error(
@@ -388,4 +396,4 @@ export const done = runScript("Unexpected error during minting workflow", async 
     hcs_tx_id: hcsTxId,
     timestamp: new Date().toISOString(),
   });
-});
+}, { usage: USAGE });

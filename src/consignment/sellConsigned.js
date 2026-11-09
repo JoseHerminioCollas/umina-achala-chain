@@ -32,11 +32,11 @@ import {
 import { consignmentProblems, consignmentSplit } from "./lib.js";
 import { buildEvent, loadSubmitKey, submitEvent, submitKeyProblem } from "../hcs.js";
 import { parseEcdsaKey } from "../keys.js";
-import { fail, loadEnv, runScript } from "../script.js";
+import { fail, loadEnv, parseScriptArgs, runScript } from "../script.js";
 
-const args = process.argv.slice(2);
-const dryRun = args.includes("--dry-run");
-const [serial, price] = args.filter((a) => !a.startsWith("--"));
+const args = parseScriptArgs({ "dry-run": { type: "boolean" } }, 2);
+const dryRun = Boolean(args.values["dry-run"]);
+const [serial, price] = args.positionals;
 loadEnv();
 
 const REQUIRED = [
@@ -51,8 +51,18 @@ const REQUIRED = [
 
 const tinybars = (n) => Hbar.fromTinybars(n.toString());
 
+const USAGE = `Sell a consigned Umiña in one transfer: the buyer pays, the merchant ends
+with 70% and UA with 30% after the royalty, and the NFT goes to the buyer.
+Recorded as SALE.
+
+Usage: node src/consignment/sellConsigned.js <serial> <price-hbar> [--dry-run]
+
+  <serial>       the Umiña NFT serial, held by the merchant
+  <price-hbar>   the price in HBAR`;
+
 runScript("Sale failed", async (session) => {
   // --- 1. Check the arguments and environment ---
+  if (args.problems.length) return fail(args.problems);
   const problems = consignmentProblems(process.env, REQUIRED, serial);
   if (!(Number(price) > 0)) problems.push("give the price in HBAR as a positive number");
   const submitProblem = submitKeyProblem(process.env);
@@ -162,4 +172,4 @@ runScript("Sale failed", async (session) => {
     hcs_tx_id: hcsTxId,
     timestamp: new Date().toISOString(),
   });
-});
+}, { usage: USAGE });

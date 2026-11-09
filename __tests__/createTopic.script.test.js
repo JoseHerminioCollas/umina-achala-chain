@@ -28,7 +28,7 @@ function mockDependencies({ executeError, mirrorStatus = 404, mirrorBody = {} } 
   jest.doMock("../src/topic/lib.js", () => {
     const actual = jest.requireActual("../src/topic/lib.js");
     const tx = {
-      freezeWith: jest.fn(async () => tx),
+      freezeWith: jest.fn(() => tx),
       sign: jest.fn(async (k) => calls.signed.push(k.publicKey.toString())),
       execute: jest.fn(async () => {
         calls.executed = true;

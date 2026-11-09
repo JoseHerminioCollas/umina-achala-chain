@@ -57,7 +57,8 @@ import {
   saleFields,
   saleLedgerProblems,
 } from "./lib.js";
-import { accountKey, nftInfo, topicEvents, transactionRecord } from "../mirror.js";
+import { accountKey, nftInfo, transactionRecord } from "../mirror.js";
+import { readProvenance } from "../provenance.js";
 import { buildEvent, loadSubmitKey, submitEvent } from "../hcs.js";
 import { achalaSaleFields, achalaSalePlan, mintOfSerial } from "../mint/achala.js";
 import { TOKEN_CLASSES } from "../token/lib.js";
@@ -178,6 +179,18 @@ async function prepareDelivery(input, env, events) {
   };
 }
 
+const USAGE = `Record a SALE or DELIVERED event for something that already happened, after
+checking it against the ledger. It never moves an NFT or HBAR.
+
+Usage:
+  node src/record/recordEvent.js sale <serial> --seller <id> --buyer <id>
+    --nft-tx <tx-id> --payment <on_chain|off_chain> [--payment-tx <tx-id>]
+    [--sold-for <amount> [--currency <code>]] [--stone-id <id>]
+    [--token umina|achala] [--dry-run]
+  node src/record/recordEvent.js delivered <serial> --buyer <id>
+    [--method in_person] [--delivered-at <date-time>] [--proof <file>]
+    [--stone-id <id>] [--token umina|achala] [--dry-run]`;
+
 runScript("Recording failed", async (session) => {
   // --- 1. Check the arguments and the environment ---
   const input = parseRecordArgs(process.argv.slice(2));
@@ -187,12 +200,8 @@ runScript("Recording failed", async (session) => {
   if (problems.length) return fail(problems);
 
   // --- 2. Read the topic, then check the event against it and the ledger ---
-  let events;
-  try {
-    events = await topicEvents(process.env.HCS_TOPIC_ID);
-  } catch (err) {
-    return fail([`cannot read HCS_TOPIC_ID ${process.env.HCS_TOPIC_ID}: ${err.message}`]);
-  }
+  const { events, problem } = await readProvenance(process.env);
+  if (problem) return fail([problem]);
   const prepared =
     input.command === "sale"
       ? await prepareSale(input, process.env, events)
@@ -223,4 +232,4 @@ runScript("Recording failed", async (session) => {
     ref: prepared.event.ref,
     hcs_tx_id: hcsTxId,
   });
-});
+}, { usage: USAGE });

@@ -44,7 +44,7 @@ import {
 import { parseSaleArgs, saleProblems } from "./lib.js";
 import { parseEcdsaKey } from "../keys.js";
 import { buildEvent, loadSubmitKey, submitEvent } from "../hcs.js";
-import { topicEvents } from "../mirror.js";
+import { mountIds, readProvenance } from "../provenance.js";
 import { achalaSaleFields, achalaSalePlan, mountedProblem } from "../mint/achala.js";
 import { TOKEN_CLASSES } from "../token/lib.js";
 import { fail, loadEnv, runScript } from "../script.js";
@@ -54,6 +54,16 @@ const { serial, price, tokenClass, dryRun } = input;
 const isAchala = tokenClass === "achala";
 loadEnv();
 
+
+const USAGE = `Sell an item UA holds itself, from the Treasury, in one transfer: the buyer
+pays UA and the NFT goes to the buyer (an Achala with its stones). Recorded
+as SALE.
+
+Usage: node src/sale/sellOwnItem.js <serial> <price-hbar> [--token umina|achala] [--dry-run]
+
+  <serial>               the NFT serial, held by the Treasury
+  <price-hbar>           the price in HBAR
+  --token umina|achala   the token class (default umina)`;
 
 runScript("Sale failed", async (session) => {
   // --- 1. Check the arguments and environment ---
@@ -75,17 +85,9 @@ runScript("Sale failed", async (session) => {
   const priceHbar = Hbar.fromString(price);
 
   // --- 2. Check the item against the provenance topic ---
-  let events;
-  try {
-    events = await topicEvents(process.env.HCS_TOPIC_ID);
-  } catch (err) {
-    return fail([`cannot read HCS_TOPIC_ID ${process.env.HCS_TOPIC_ID}: ${err.message}`]);
-  }
-  const ids = {
-    uminaTokenId: process.env.UMINA_TOKEN_ID,
-    achalaTokenId: process.env.ACHALA_TOKEN_ID,
-    serial,
-  };
+  const { events, problem } = await readProvenance(process.env);
+  if (problem) return fail([problem]);
+  const ids = mountIds(process.env, serial);
   // An Achala moves with its stones; an Umiña must not be in an Achala
   let plan = { stones: [] };
   if (isAchala) {
@@ -181,4 +183,4 @@ runScript("Sale failed", async (session) => {
     hcs_tx_id: hcsTxId,
     timestamp: new Date().toISOString(),
   });
-});
+}, { usage: USAGE });

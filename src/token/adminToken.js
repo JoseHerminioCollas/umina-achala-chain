@@ -54,8 +54,7 @@ import {
 } from "./lib.js";
 import { parseEcdsaKey } from "../keys.js";
 import { buildEvent, loadSubmitKey, submitEvent } from "../hcs.js";
-import { topicEvents } from "../mirror.js";
-import { mountedProblem } from "../mint/achala.js";
+import { mountedStoneProblem, readProvenance } from "../provenance.js";
 import { fail, loadEnv, runScript } from "../script.js";
 
 loadEnv();
@@ -99,6 +98,16 @@ function describe(input, env, tokenId) {
 
 let actionTxId;
 
+const USAGE = `Use the token's admin keys.
+
+Usage: node src/token/adminToken.js <command> [serial] [options] [--token umina|achala] [--dry-run]
+
+  fees --fallback-hbar <hbar> [--royalty <percent>]   replace the custom fees
+  pause | unpause                                     stop or allow every transfer
+  wipe <serial> --account <id> --reason <text>        remove a serial from an account
+  burn <serial> --reason <text>                       burn a serial held by the Treasury
+  --token umina|achala                                the token class (default umina)`;
+
 runScript("Token admin failed", async (session) => {
   // --- 1. Check the command and the environment ---
   const input = parseAdminArgs(process.argv.slice(2));
@@ -111,17 +120,9 @@ runScript("Token admin failed", async (session) => {
 
   // An Umiña in an Achala is burned only by burning the Achala (#24)
   if (input.tokenClass === "umina" && (input.command === "wipe" || input.command === "burn")) {
-    let events;
-    try {
-      events = await topicEvents(process.env.HCS_TOPIC_ID);
-    } catch (err) {
-      return fail([`cannot read HCS_TOPIC_ID ${process.env.HCS_TOPIC_ID}: ${err.message}`]);
-    }
-    const mounted = mountedProblem(events, {
-      uminaTokenId: process.env.UMINA_TOKEN_ID,
-      achalaTokenId: process.env.ACHALA_TOKEN_ID,
-      serial: input.serial,
-    });
+    const { events, problem } = await readProvenance(process.env);
+    if (problem) return fail([problem]);
+    const mounted = mountedStoneProblem(events, process.env, input.serial);
     if (mounted) return fail([`${mounted}; burn the Achala first (--token achala)`]);
   }
   console.log(`Would ${describe(input, process.env, tokenId)}, signed by ${key}.`);
@@ -172,8 +173,11 @@ runScript("Token admin failed", async (session) => {
     );
     console.log(`✅ BURN recorded: ${hcsTxId}`);
   }
-}, () => {
-  if (actionTxId) {
-    console.error(`   The ${process.argv[2]} already happened in ${actionTxId}, but BURN was not recorded.`);
-  }
+}, {
+  usage: USAGE,
+  afterError: () => {
+    if (actionTxId) {
+      console.error(`   The ${process.argv[2]} already happened in ${actionTxId}, but BURN was not recorded.`);
+    }
+  },
 });
