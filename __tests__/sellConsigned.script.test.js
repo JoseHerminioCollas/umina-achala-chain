@@ -110,7 +110,7 @@ describe("sellConsigned.js", () => {
     jest.restoreAllMocks();
   });
 
-  test("settles the 70 / 30 sale and the NFT in one transaction, signed by the buyer", async () => {
+  test("settles the sale and the NFT in one transaction, legs set so the merchant ends with 70% after the royalty (#30)", async () => {
     mockDependencies();
     await runScript("7", "100");
 
@@ -118,8 +118,8 @@ describe("sellConsigned.js", () => {
     const sale = step("sale");
     expect(hbarMoves(sale)).toEqual([
       ["0.0.6006", "-10000000000"],
-      ["0.0.4004", "7000000000"],
-      ["0.0.1001", "3000000000"],
+      ["0.0.4004", "7368421053"],
+      ["0.0.1001", "2631578947"],
     ]);
     const [[nftId, from, to]] = callsTo(sale, "addApprovedNftTransfer");
     expect([nftId.toString(), from.toString(), to.toString()]).toEqual([
@@ -153,8 +153,8 @@ describe("sellConsigned.js", () => {
       sold_for: "100",
       currency: "HBAR",
       price_tinybars: "10000000000",
-      merchant_tinybars: "7000000000",
-      ua_tinybars: "3000000000",
+      merchant_tinybars: "7368421053",
+      ua_tinybars: "2631578947",
     });
     expect(step("hcs").signed).toEqual([]);
   });

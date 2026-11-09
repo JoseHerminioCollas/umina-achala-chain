@@ -1,10 +1,14 @@
 /**
  * @file sellConsigned.js
  * @description Sells a consigned Umiña NFT on Hedera TESTNET in one atomic
- * transfer: the buyer pays the price in HBAR, 70% goes to the merchant and 30%
- * to UA, and UA moves the NFT from the merchant to the buyer using the
- * merchant's allowance (see consignToMerchant.js). The sale is then notarized
- * in HCS.
+ * transfer: the buyer pays the price in HBAR to the merchant and UA, and UA
+ * moves the NFT from the merchant to the buyer using the merchant's allowance
+ * (see consignToMerchant.js). The sale is then notarized in HCS.
+ *
+ * The merchant ends with 70% and UA with 30%, the royalty included
+ * (umina-achala-chain#30): HTS takes the 5% royalty from the merchant's leg
+ * and pays it to the Treasury, so the merchant's leg is 70% / 0.95 (73.68 on
+ * 100) and UA's the rest (26.32). See consignmentSplit in lib.js.
  *
  * Run from the command line:
  * node src/consignment/sellConsigned.js <serial> <price-hbar> [--dry-run]
@@ -12,7 +16,7 @@
  * UA (the operator) pays the fees and is the allowance spender, so the
  * merchant does not sign. The buyer signs because HBAR leaves their account;
  * on testnet BUYER_KEY simulates that. The buyer must have associated the
- * Umiña token. HTS takes the royalty from the merchant's share on top of this.
+ * Umiña token.
  */
 
 import dotenv from "dotenv";
@@ -71,11 +75,13 @@ async function main() {
 
     const priceTinybars = BigInt(new Hbar(Number(price)).toTinybars().toString());
     const split = consignmentSplit(priceTinybars);
+    console.log(`Sale of ${nftId} for ${tinybars(priceTinybars)}:`);
     console.table({
-      nft: nftId.toString(),
-      price: tinybars(priceTinybars).toString(),
-      merchant: tinybars(split.merchant).toString(),
-      ua: tinybars(split.ua).toString(),
+      merchant: {
+        paid: tinybars(split.merchant).toString(),
+        after_royalty: tinybars(split.merchantNet).toString(),
+      },
+      ua: { paid: tinybars(split.ua).toString(), after_royalty: tinybars(split.uaNet).toString() },
     });
 
     if (dryRun) {
@@ -122,7 +128,8 @@ async function main() {
     // The sale has settled, so if this fails say so and keep what is needed
     // to notarize it by hand. submitEvent waits for the receipt, so a message
     // rejected at consensus lands here too. SALE fields follow the event
-    // catalog in umina-achala-chain#10; the split is kept in tinybars.
+    // catalog in umina-achala-chain#10; the split is kept in tinybars, as the
+    // legs paid (the merchant's before HTS takes the royalty from it, #30).
     let hcsTxId;
     try {
       const message = buildEvent(

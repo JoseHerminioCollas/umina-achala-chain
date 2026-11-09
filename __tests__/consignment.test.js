@@ -19,21 +19,40 @@ describe("roleProblems", () => {
   });
 });
 
-describe("consignmentSplit", () => {
-  test("splits 100 HBAR into 70 to the merchant and 30 to UA", () => {
+describe("consignmentSplit (umina-achala-chain#30)", () => {
+  test("100 HBAR: legs 73.68 / 26.32, then 70 / 30 after the 5% royalty", () => {
     expect(consignmentSplit(10_000_000_000n)).toEqual({
-      merchant: 7_000_000_000n,
-      ua: 3_000_000_000n,
+      merchant: 7_368_421_053n,
+      ua: 2_631_578_947n,
+      royalty: 368_421_052n,
+      merchantNet: 7_000_000_001n,
+      uaNet: 2_999_999_999n,
     });
   });
 
-  test("shares always add up to the price, odd tinybars go to the merchant", () => {
-    for (const price of [1n, 7n, 333n, 10_000_000_001n]) {
-      const { merchant, ua } = consignmentSplit(price);
-      expect(merchant + ua).toBe(price);
-      expect(merchant).toBeGreaterThanOrEqual(ua);
+  test("the legs add up to the price, and the merchant ends with at least 70%", () => {
+    for (const price of [1n, 7n, 333n, 100_000_000n, 10_000_000_001n, 123_456_789_012n]) {
+      const s = consignmentSplit(price);
+      expect(s.merchant + s.ua).toBe(price);
+      expect(s.merchantNet + s.uaNet).toBe(price);
+      expect(s.merchantNet * 10n).toBeGreaterThanOrEqual(price * 7n);
     }
-    expect(consignmentSplit(7n)).toEqual({ merchant: 5n, ua: 2n });
+  });
+
+  test("rounding gives the merchant at most one tinybar over 70%", () => {
+    const price = 10_000_000_000n;
+    const s = consignmentSplit(price);
+    expect(s.merchantNet - (price * 7n) / 10n).toBeLessThanOrEqual(1n);
+  });
+
+  test("uses the royalty it is given; with no royalty the legs are 70 / 30", () => {
+    expect(consignmentSplit(10_000_000_000n, { numerator: 0, denominator: 100 })).toEqual({
+      merchant: 7_000_000_000n,
+      ua: 3_000_000_000n,
+      royalty: 0n,
+      merchantNet: 7_000_000_000n,
+      uaNet: 3_000_000_000n,
+    });
   });
 
   test("rejects a price that is not a positive bigint", () => {
