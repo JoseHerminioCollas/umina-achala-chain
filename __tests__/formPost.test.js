@@ -28,6 +28,13 @@ describe("metadataFromForm", () => {
     expect(metadata.metadata_version).toBe(template.metadata_version);
   });
 
+  test("the post sets creator, not under properties (umina-achala-chain#31)", () => {
+    const metadata = metadataFromForm({ ...form(), creator: "Taller Ejemplo" }, template, base);
+    expect(metadata.creator).toBe("Taller Ejemplo");
+    expect(metadata.properties).not.toHaveProperty("creator");
+    expect(metadataFromForm({ ...form(), creator: "" }, template, base).creator).toBe(template.creator);
+  });
+
   test("puts every other field under properties", () => {
     const metadata = metadataFromForm(form(), template, base);
     expect(metadata.properties).toEqual({

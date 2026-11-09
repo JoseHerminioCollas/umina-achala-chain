@@ -7,6 +7,8 @@
  *
  * The metadata starts as a copy of json/umina-template.json (fixed fields keep their
  * values, everything the form supplies is null) and is filled from the post.
+ * `creator` defaults to the template's (Umiña Achala); the form sets it to the
+ * seller or the artisan for a merchant's item (umina-achala-chain#31).
  * Fields the post leaves empty are removed, so "absent" means "not provided"
  * and a missing compliance field fails validation instead of passing as "".
  */
@@ -14,7 +16,7 @@
 import fs from "fs";
 import path from "path";
 
-const RESERVED = ["name", "description", "attributes", "main_image", "images", "documents"];
+const RESERVED = ["name", "description", "creator", "attributes", "main_image", "images", "documents"];
 
 /** Converts the form's `attributes` map into pairs, skipping empty values. */
 function toAttributes(attributes = {}) {
@@ -48,13 +50,14 @@ function prune(object) {
 
 /**
  * Fills a copy of the template from a form post. Every field other than name,
- * description, attributes, images and documents goes under `properties`.
+ * description, creator, attributes, images and documents goes under `properties`.
  * Empty fields are removed.
  */
 export function metadataFromForm(form, template, baseDir) {
   const filled = structuredClone(template);
   filled.name = form.name;
   filled.description = form.description;
+  if (form.creator) filled.creator = form.creator;
   filled.properties = prune({
     ...filled.properties,
     ...Object.fromEntries(Object.entries(form).filter(([key]) => !RESERVED.includes(key))),

@@ -5,7 +5,7 @@
   "required": ["name", "creator", "description", "image", "format", "metadata_version", "properties", "files", "attributes"],
   "properties": {
     "name": { "type": "string" },
-    "creator": { "type": "string" },
+    "creator": { "type": "string", "minLength": 1, "description": "The seller or the artisan, as the merchant chooses; Umiña Achala for its own pieces (umina-achala-chain#31)" },
     "description": { "type": "string" },
     "image": { "type": "string", "pattern": "^ipfs://.*" },
     "type": { "type": "string" },
@@ -14,7 +14,7 @@
 
     "properties": {
       "type": "object",
-      "required": ["stone_id", "piece_type", "umina_token_id", "stones", "technique", "artisan_rna", "hs_code", "jurisdiction", "legal_uri", "vendor_ruc"],
+      "required": ["stone_id", "piece_type", "umina_token_id", "stones", "technique", "artisan_rna", "hs_code", "jurisdiction", "legal_uri", "vendor_name", "vendor_ruc"],
       "properties": {
         "stone_id": {
           "type": "string",
@@ -66,6 +66,11 @@
         },
         "jurisdiction": { "type": "string" },
         "legal_uri": { "type": "string", "format": "uri" },
+        "vendor_name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Name of the seller: the merchant who owns the item, or Umiña Achala for its own items. Public and permanent (umina-achala-web#90, umina-achala-chain#31)"
+        },
         "vendor_ruc": {
           "type": "string",
           "pattern": "^(10|15|17|20)\\d{9}$",

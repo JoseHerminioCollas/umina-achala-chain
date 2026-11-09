@@ -10,6 +10,8 @@
   "hs_code": "7113.11.00.00",
   "jurisdiction": "Peru",
   "legal_uri": "https://umina-achala.pe/",
+  "creator": "Joyería Ejemplo S.A.C.",
+  "vendor_name": "Joyería Ejemplo S.A.C.",
   "vendor_ruc": "20999887768",
   "attributes": { "Chain Length": "45 cm" },
   "main_image": { "file": "../samples/master.jpg", "description": "Front view" },

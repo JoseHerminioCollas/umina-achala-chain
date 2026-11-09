@@ -18,6 +18,7 @@ describe("validateMetadata", () => {
     "hs_code",
     "jurisdiction",
     "legal_uri",
+    "vendor_name",
     "vendor_ruc",
     "mining_concession",
     "reinfo_id",
@@ -27,6 +28,15 @@ describe("validateMetadata", () => {
     const { valid, errors } = validateMetadata(metadata);
     expect(valid).toBe(false);
     expect(JSON.stringify(errors)).toContain(field);
+  });
+
+  test("rejects an empty vendor_name or creator (umina-achala-chain#31)", () => {
+    const noName = load();
+    noName.properties.vendor_name = "";
+    expect(validateMetadata(noName).valid).toBe(false);
+    const noCreator = load();
+    noCreator.creator = "";
+    expect(validateMetadata(noCreator).valid).toBe(false);
   });
 
   test("rejects a legal_uri that is not a URI", () => {

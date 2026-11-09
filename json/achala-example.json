@@ -1,6 +1,6 @@
 {
   "name": "Achala Ring #01 - Chrysocolla in Gold",
-  "creator": "Umiña Achala",
+  "creator": "Joyería Ejemplo S.A.C.",
   "description": "Ring set with a certified Umiña chrysocolla, in 18k gold from a certified Umiña nugget (fake data for testing).",
   "format": "HIP412@2.0.0",
   "metadata_version": "1.0.0",
@@ -22,6 +22,7 @@
     "hs_code": "7113.19.00.00",
     "jurisdiction": "Peru",
     "legal_uri": "https://umina-achala.pe/",
+    "vendor_name": "Joyería Ejemplo S.A.C.",
     "vendor_ruc": "20999887768"
   },
   "attributes": [

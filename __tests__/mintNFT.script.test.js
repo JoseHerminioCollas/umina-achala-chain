@@ -762,6 +762,7 @@ describe("mintNFT.js", () => {
       hs_code: "7103.99.00.00",
       jurisdiction: "Peru",
       legal_uri: "https://umina-achala.pe/",
+      vendor_name: "Umiña Achala",
       vendor_ruc: "20999887768",
       mining_concession: "010253815",
       reinfo_id: "10456789124",
