@@ -1,7 +1,7 @@
 /**
  * @file adminToken.js
- * @description Uses the Umiña token's admin keys on Hedera TESTNET
- * (umina-achala-chain#21). Each command is signed by its own key:
+ * @description Uses the Umiña token's admin keys on Hedera (NETWORK, testnet by
+ * default) (umina-achala-chain#21). Each command is signed by its own key:
  *
  *   fees --fallback-hbar <hbar> [--royalty <percent>]   FEE_SCHEDULE_KEY
  *     Replaces the custom fees: the royalty (default 5%) to the treasury,
@@ -34,10 +34,8 @@
  * event. --dry-run checks the input and environment and sends nothing.
  */
 
-import dotenv from "dotenv";
 import {
   AccountId,
-  Client,
   NftId,
   TokenBurnTransaction,
   TokenFeeScheduleUpdateTransaction,
@@ -58,14 +56,10 @@ import { parseEcdsaKey } from "../keys.js";
 import { buildEvent, loadSubmitKey, submitEvent } from "../hcs.js";
 import { topicEvents } from "../mirror.js";
 import { mountedProblem } from "../mint/achala.js";
+import { fail, loadEnv, runScript } from "../script.js";
 
-dotenv.config({ path: ".env.testnet" });
+loadEnv();
 
-function fail(problems) {
-  console.error("❌ Problems found:");
-  problems.forEach((p) => console.error(`   - ${p}`));
-  process.exitCode = 1;
-}
 
 /** Builds the (unfrozen) transaction for a command. */
 function buildTransaction(input, env, tokenId) {
@@ -103,91 +97,83 @@ function describe(input, env, tokenId) {
   }
 }
 
-async function main() {
-  let client;
-  let actionTxId;
-  try {
-    // --- 1. Check the command and the environment ---
-    const input = parseAdminArgs(process.argv.slice(2));
-    if (input.problems.length) return fail(input.problems);
-    const envProblems = adminEnvProblems(process.env, input.command, input.tokenClass);
-    if (envProblems.length) return fail(envProblems);
+let actionTxId;
 
-    const tokenId = TokenId.fromString(process.env[TOKEN_CLASSES[input.tokenClass].envVar]);
-    const { key } = ADMIN_COMMANDS[input.command];
+runScript("Token admin failed", async (session) => {
+  // --- 1. Check the command and the environment ---
+  const input = parseAdminArgs(process.argv.slice(2));
+  if (input.problems.length) return fail(input.problems);
+  const envProblems = adminEnvProblems(process.env, input.command, input.tokenClass);
+  if (envProblems.length) return fail(envProblems);
 
-    // An Umiña in an Achala is burned only by burning the Achala (#24)
-    if (input.tokenClass === "umina" && (input.command === "wipe" || input.command === "burn")) {
-      let events;
-      try {
-        events = await topicEvents(process.env.HCS_TOPIC_ID);
-      } catch (err) {
-        return fail([`cannot read HCS_TOPIC_ID ${process.env.HCS_TOPIC_ID}: ${err.message}`]);
-      }
-      const mounted = mountedProblem(events, {
-        uminaTokenId: process.env.UMINA_TOKEN_ID,
-        achalaTokenId: process.env.ACHALA_TOKEN_ID,
-        serial: input.serial,
-      });
-      if (mounted) return fail([`${mounted}; burn the Achala first (--token achala)`]);
+  const tokenId = TokenId.fromString(process.env[TOKEN_CLASSES[input.tokenClass].envVar]);
+  const { key } = ADMIN_COMMANDS[input.command];
+
+  // An Umiña in an Achala is burned only by burning the Achala (#24)
+  if (input.tokenClass === "umina" && (input.command === "wipe" || input.command === "burn")) {
+    let events;
+    try {
+      events = await topicEvents(process.env.HCS_TOPIC_ID);
+    } catch (err) {
+      return fail([`cannot read HCS_TOPIC_ID ${process.env.HCS_TOPIC_ID}: ${err.message}`]);
     }
-    console.log(`Would ${describe(input, process.env, tokenId)}, signed by ${key}.`);
-    if (input.dryRun) {
-      console.log("Dry run, nothing sent.");
-      return;
-    }
-
-    // --- 2. Connect to Hedera testnet (UA pays the fee) ---
-    const operatorId = AccountId.fromString(process.env.OPERATOR_ID);
-    client = Client.forTestnet().setOperator(operatorId, parseEcdsaKey(process.env.OPERATOR_KEY));
-
-    // --- 3. For wipe and burn, check who holds the serial ---
-    if (input.command === "wipe" || input.command === "burn") {
-      const holder = input.command === "wipe" ? input.account : process.env.TREASURY_ID;
-      const nftId = new NftId(tokenId, Number(input.serial));
-      const [info] = await new TokenNftInfoQuery().setNftId(nftId).execute(client);
-      if (info.accountId.toString() !== holder) {
-        const where = input.command === "burn" ? "the treasury" : "--account";
-        return fail([`${nftId} is held by ${info.accountId}, not ${where} ${holder}`]);
-      }
-    }
-
-    // --- 4. Sign with the command's key and execute ---
-    const frozen = await buildTransaction(input, process.env, tokenId)
-      .freezeWith(client)
-      .sign(parseEcdsaKey(process.env[key]));
-    const response = await frozen.execute(client);
-    const receipt = await response.getReceipt(client);
-    actionTxId = response.transactionId.toString();
-    console.log(`✅ ${input.command}: ${receipt.status} (${actionTxId})`);
-
-    // --- 5. Record BURN for wipe and burn ---
-    if (ADMIN_COMMANDS[input.command].records) {
-      const message = buildEvent(
-        { event: "BURN", tokenId, serials: [input.serial], actorId: operatorId, ref: actionTxId },
-        {
-          reason: input.reason,
-          method: input.command,
-          ...(input.command === "wipe" && { from_id: input.account }),
-        },
-      );
-      const hcsTxId = await submitEvent(
-        client,
-        process.env.HCS_TOPIC_ID,
-        message,
-        loadSubmitKey(process.env),
-      );
-      console.log(`✅ BURN recorded: ${hcsTxId}`);
-    }
-  } catch (err) {
-    console.error("❌ Token admin failed:", err);
-    if (actionTxId) {
-      console.error(`   The ${process.argv[2]} already happened in ${actionTxId}, but BURN was not recorded.`);
-    }
-    process.exitCode = 1;
-  } finally {
-    client?.close();
+    const mounted = mountedProblem(events, {
+      uminaTokenId: process.env.UMINA_TOKEN_ID,
+      achalaTokenId: process.env.ACHALA_TOKEN_ID,
+      serial: input.serial,
+    });
+    if (mounted) return fail([`${mounted}; burn the Achala first (--token achala)`]);
   }
-}
+  console.log(`Would ${describe(input, process.env, tokenId)}, signed by ${key}.`);
+  if (input.dryRun) {
+    console.log("Dry run, nothing sent.");
+    return;
+  }
 
-main();
+  // --- 2. Connect to Hedera (UA pays the fee) ---
+  const operatorId = AccountId.fromString(process.env.OPERATOR_ID);
+  const client = session.connect();
+
+  // --- 3. For wipe and burn, check who holds the serial ---
+  if (input.command === "wipe" || input.command === "burn") {
+    const holder = input.command === "wipe" ? input.account : process.env.TREASURY_ID;
+    const nftId = new NftId(tokenId, Number(input.serial));
+    const [info] = await new TokenNftInfoQuery().setNftId(nftId).execute(client);
+    if (info.accountId.toString() !== holder) {
+      const where = input.command === "burn" ? "the treasury" : "--account";
+      return fail([`${nftId} is held by ${info.accountId}, not ${where} ${holder}`]);
+    }
+  }
+
+  // --- 4. Sign with the command's key and execute ---
+  const frozen = await buildTransaction(input, process.env, tokenId)
+    .freezeWith(client)
+    .sign(parseEcdsaKey(process.env[key]));
+  const response = await frozen.execute(client);
+  const receipt = await response.getReceipt(client);
+  actionTxId = response.transactionId.toString();
+  console.log(`✅ ${input.command}: ${receipt.status} (${actionTxId})`);
+
+  // --- 5. Record BURN for wipe and burn ---
+  if (ADMIN_COMMANDS[input.command].records) {
+    const message = buildEvent(
+      { event: "BURN", tokenId, serials: [input.serial], actorId: operatorId, ref: actionTxId },
+      {
+        reason: input.reason,
+        method: input.command,
+        ...(input.command === "wipe" && { from_id: input.account }),
+      },
+    );
+    const hcsTxId = await submitEvent(
+      client,
+      process.env.HCS_TOPIC_ID,
+      message,
+      loadSubmitKey(process.env),
+    );
+    console.log(`✅ BURN recorded: ${hcsTxId}`);
+  }
+}, () => {
+  if (actionTxId) {
+    console.error(`   The ${process.argv[2]} already happened in ${actionTxId}, but BURN was not recorded.`);
+  }
+});

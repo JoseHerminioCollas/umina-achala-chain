@@ -7,7 +7,9 @@ import {
   TOPICS,
   validateTopicEnv,
 } from "../src/topic/lib.js";
-import { MIRROR_NODE } from "../src/mirror.js";
+import { mirrorNode } from "../src/network.js";
+
+const MIRROR_NODE = mirrorNode();
 
 // Real SDK, no network: keys are generated and the transaction is only built.
 const operatorKey = PrivateKey.generateECDSA().toStringDer();

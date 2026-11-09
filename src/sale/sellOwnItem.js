@@ -1,9 +1,9 @@
 /**
  * @file sellOwnItem.js
  * @description Sells an NFT that UA holds itself, straight from the Treasury,
- * on Hedera TESTNET, in one atomic transfer: the buyer pays the price in HBAR
- * to UA, and the Treasury sends the NFT to the buyer. The sale is then
- * recorded as SALE in HCS (umina-achala-chain#19).
+ * on Hedera (NETWORK, testnet by default), in one atomic transfer: the buyer
+ * pays the price in HBAR to UA, and the Treasury sends the NFT to the buyer.
+ * The sale is then recorded as SALE in HCS (umina-achala-chain#19).
  *
  * Run from the command line:
  * node src/sale/sellOwnItem.js <serial> <price-hbar> [--token umina|achala] [--dry-run]
@@ -33,10 +33,8 @@
  * "To Verify on Testnet").
  */
 
-import dotenv from "dotenv";
 import {
   AccountId,
-  Client,
   Hbar,
   NftId,
   TokenId,
@@ -49,152 +47,138 @@ import { buildEvent, loadSubmitKey, submitEvent } from "../hcs.js";
 import { topicEvents } from "../mirror.js";
 import { achalaSaleFields, achalaSalePlan, mountedProblem } from "../mint/achala.js";
 import { TOKEN_CLASSES } from "../token/lib.js";
+import { fail, loadEnv, runScript } from "../script.js";
 
 const input = parseSaleArgs(process.argv.slice(2));
 const { serial, price, tokenClass, dryRun } = input;
 const isAchala = tokenClass === "achala";
-dotenv.config({ path: ".env.testnet" });
+loadEnv();
 
-function fail(problems) {
-  console.error("❌ Problems found:");
-  problems.forEach((p) => console.error(`   - ${p}`));
-  process.exitCode = 1;
-}
 
-async function main() {
-  let client;
+runScript("Sale failed", async (session) => {
+  // --- 1. Check the arguments and environment ---
+  const problems = [...input.problems];
+  if (!problems.length) problems.push(...saleProblems(process.env, serial, price, tokenClass));
+  if (problems.length) return fail(problems);
+
+  const { name: className, envVar } = TOKEN_CLASSES[tokenClass];
+  const uaId = AccountId.fromString(process.env.OPERATOR_ID);
+  const treasuryId = AccountId.fromString(process.env.TREASURY_ID);
+  const buyerId = AccountId.fromString(process.env.BUYER_ID);
+  const tokenId = TokenId.fromString(process.env[envVar]);
+  const nftId = new NftId(tokenId, Number(serial));
+  const buyerKey = parseEcdsaKey(process.env.BUYER_KEY);
+  const treasuryKey =
+    process.env.TREASURY_ID === process.env.OPERATOR_ID
+      ? null
+      : parseEcdsaKey(process.env.TREASURY_KEY);
+  const priceHbar = Hbar.fromString(price);
+
+  // --- 2. Check the item against the provenance topic ---
+  let events;
   try {
-    // --- 1. Check the arguments and environment ---
-    const problems = [...input.problems];
-    if (!problems.length) problems.push(...saleProblems(process.env, serial, price, tokenClass));
-    if (problems.length) return fail(problems);
-
-    const { name: className, envVar } = TOKEN_CLASSES[tokenClass];
-    const uaId = AccountId.fromString(process.env.OPERATOR_ID);
-    const treasuryId = AccountId.fromString(process.env.TREASURY_ID);
-    const buyerId = AccountId.fromString(process.env.BUYER_ID);
-    const tokenId = TokenId.fromString(process.env[envVar]);
-    const nftId = new NftId(tokenId, Number(serial));
-    const buyerKey = parseEcdsaKey(process.env.BUYER_KEY);
-    const treasuryKey =
-      process.env.TREASURY_ID === process.env.OPERATOR_ID
-        ? null
-        : parseEcdsaKey(process.env.TREASURY_KEY);
-    const priceHbar = Hbar.fromString(price);
-
-    // --- 2. Check the item against the provenance topic ---
-    let events;
-    try {
-      events = await topicEvents(process.env.HCS_TOPIC_ID);
-    } catch (err) {
-      return fail([`cannot read HCS_TOPIC_ID ${process.env.HCS_TOPIC_ID}: ${err.message}`]);
-    }
-    const ids = {
-      uminaTokenId: process.env.UMINA_TOKEN_ID,
-      achalaTokenId: process.env.ACHALA_TOKEN_ID,
-      serial,
-    };
-    // An Achala moves with its stones; an Umiña must not be in an Achala
-    let plan = { stones: [] };
-    if (isAchala) {
-      plan = achalaSalePlan(events, ids);
-      if (plan.problems.length) return fail(plan.problems);
-    } else {
-      const mounted = mountedProblem(events, ids);
-      if (mounted) return fail([mounted]);
-    }
-    const uminaTokenId = isAchala ? TokenId.fromString(process.env.UMINA_TOKEN_ID) : null;
-    const nftIds = [nftId, ...plan.stones.map((s) => new NftId(uminaTokenId, Number(s.serial)))];
-
-    console.table({
-      nft: nftId.toString(),
-      ...(isAchala && { piece: plan.achalaId, stones: plan.stones.map((s) => s.stone_id).join(", ") }),
-      from: treasuryId.toString(),
-      to: buyerId.toString(),
-      price: priceHbar.toString(),
-    });
-
-    if (dryRun) {
-      console.log("Dry run, nothing sent.");
-      return;
-    }
-
-    // --- 3. Connect to Hedera testnet as UA ---
-    client = Client.forTestnet().setOperator(uaId, parseEcdsaKey(process.env.OPERATOR_KEY));
-
-    // --- 4. Check the Treasury still holds every NFT that moves ---
-    for (const id of nftIds) {
-      const [info] = await new TokenNftInfoQuery().setNftId(id).execute(client);
-      if (info.accountId.toString() !== treasuryId.toString()) {
-        return fail([`${id} is held by ${info.accountId}, not the Treasury ${treasuryId}. Remove the listing.`]);
-      }
-    }
-
-    // --- 5. One atomic transfer: the price to UA, the NFT(s) to the buyer ---
-    let saleTx = new TransferTransaction()
-      .addHbarTransfer(buyerId, priceHbar.negated())
-      .addHbarTransfer(uaId, priceHbar);
-    for (const id of nftIds) saleTx = saleTx.addNftTransfer(id, treasuryId, buyerId);
-    saleTx = saleTx.setTransactionMemo(`${className} sale ${nftId}`).freezeWith(client);
-    saleTx = await saleTx.sign(buyerKey);
-    if (treasuryKey) saleTx = await saleTx.sign(treasuryKey);
-    const saleResponse = await saleTx.execute(client);
-    const saleReceipt = await saleResponse.getReceipt(client);
-    const saleTxId = saleResponse.transactionId.toString();
-    console.log(`✅ Sold ${nftIds.join(", ")} to ${buyerId}: ${saleReceipt.status} (${saleTxId})`);
-
-    // --- 6. Record the sale in HCS ---
-    // The sale has settled, so if this fails say so and keep what is needed
-    // to record it by hand. submitEvent waits for the receipt, so a message
-    // rejected at consensus lands here too.
-    let hcsTxId;
-    try {
-      const message = buildEvent(
-        {
-          event: "SALE",
-          ...(isAchala && { stoneId: plan.achalaId }),
-          tokenId,
-          serials: [serial],
-          actorId: uaId,
-          ref: saleTxId,
-        },
-        {
-          seller_id: treasuryId.toString(),
-          buyer_id: buyerId.toString(),
-          payment: "on_chain",
-          sold_for: priceHbar.toBigNumber().toString(),
-          currency: "HBAR",
-          price_tinybars: priceHbar.toTinybars().toString(),
-          ...(isAchala && achalaSaleFields(plan.stones, uminaTokenId)),
-        },
-      );
-      hcsTxId = await submitEvent(
-        client,
-        process.env.HCS_TOPIC_ID,
-        message,
-        loadSubmitKey(process.env),
-      );
-    } catch (err) {
-      console.error(`❌ Sale ${saleTxId} settled but the HCS record failed:`, err);
-      process.exitCode = 1;
-      return;
-    }
-
-    // --- 7. Provenance logging ---
-    console.table({
-      event: "SALE",
-      nft: nftId.toString(),
-      actor_id: uaId.toString(),
-      sale_tx_id: saleTxId,
-      hcs_tx_id: hcsTxId,
-      timestamp: new Date().toISOString(),
-    });
+    events = await topicEvents(process.env.HCS_TOPIC_ID);
   } catch (err) {
-    console.error("❌ Sale failed:", err);
-    process.exitCode = 1;
-  } finally {
-    client?.close();
+    return fail([`cannot read HCS_TOPIC_ID ${process.env.HCS_TOPIC_ID}: ${err.message}`]);
   }
-}
+  const ids = {
+    uminaTokenId: process.env.UMINA_TOKEN_ID,
+    achalaTokenId: process.env.ACHALA_TOKEN_ID,
+    serial,
+  };
+  // An Achala moves with its stones; an Umiña must not be in an Achala
+  let plan = { stones: [] };
+  if (isAchala) {
+    plan = achalaSalePlan(events, ids);
+    if (plan.problems.length) return fail(plan.problems);
+  } else {
+    const mounted = mountedProblem(events, ids);
+    if (mounted) return fail([mounted]);
+  }
+  const uminaTokenId = isAchala ? TokenId.fromString(process.env.UMINA_TOKEN_ID) : null;
+  const nftIds = [nftId, ...plan.stones.map((s) => new NftId(uminaTokenId, Number(s.serial)))];
 
-main();
+  console.table({
+    nft: nftId.toString(),
+    ...(isAchala && { piece: plan.achalaId, stones: plan.stones.map((s) => s.stone_id).join(", ") }),
+    from: treasuryId.toString(),
+    to: buyerId.toString(),
+    price: priceHbar.toString(),
+  });
+
+  if (dryRun) {
+    console.log("Dry run, nothing sent.");
+    return;
+  }
+
+  // --- 3. Connect to Hedera as UA ---
+  const client = session.connect();
+
+  // --- 4. Check the Treasury still holds every NFT that moves ---
+  for (const id of nftIds) {
+    const [info] = await new TokenNftInfoQuery().setNftId(id).execute(client);
+    if (info.accountId.toString() !== treasuryId.toString()) {
+      return fail([`${id} is held by ${info.accountId}, not the Treasury ${treasuryId}. Remove the listing.`]);
+    }
+  }
+
+  // --- 5. One atomic transfer: the price to UA, the NFT(s) to the buyer ---
+  let saleTx = new TransferTransaction()
+    .addHbarTransfer(buyerId, priceHbar.negated())
+    .addHbarTransfer(uaId, priceHbar);
+  for (const id of nftIds) saleTx = saleTx.addNftTransfer(id, treasuryId, buyerId);
+  saleTx = saleTx.setTransactionMemo(`${className} sale ${nftId}`).freezeWith(client);
+  saleTx = await saleTx.sign(buyerKey);
+  if (treasuryKey) saleTx = await saleTx.sign(treasuryKey);
+  const saleResponse = await saleTx.execute(client);
+  const saleReceipt = await saleResponse.getReceipt(client);
+  const saleTxId = saleResponse.transactionId.toString();
+  console.log(`✅ Sold ${nftIds.join(", ")} to ${buyerId}: ${saleReceipt.status} (${saleTxId})`);
+
+  // --- 6. Record the sale in HCS ---
+  // The sale has settled, so if this fails say so and keep what is needed
+  // to record it by hand. submitEvent waits for the receipt, so a message
+  // rejected at consensus lands here too.
+  let hcsTxId;
+  try {
+    const message = buildEvent(
+      {
+        event: "SALE",
+        ...(isAchala && { stoneId: plan.achalaId }),
+        tokenId,
+        serials: [serial],
+        actorId: uaId,
+        ref: saleTxId,
+      },
+      {
+        seller_id: treasuryId.toString(),
+        buyer_id: buyerId.toString(),
+        payment: "on_chain",
+        sold_for: priceHbar.toBigNumber().toString(),
+        currency: "HBAR",
+        price_tinybars: priceHbar.toTinybars().toString(),
+        ...(isAchala && achalaSaleFields(plan.stones, uminaTokenId)),
+      },
+    );
+    hcsTxId = await submitEvent(
+      client,
+      process.env.HCS_TOPIC_ID,
+      message,
+      loadSubmitKey(process.env),
+    );
+  } catch (err) {
+    console.error(`❌ Sale ${saleTxId} settled but the HCS record failed:`, err);
+    process.exitCode = 1;
+    return;
+  }
+
+  // --- 7. Provenance logging ---
+  console.table({
+    event: "SALE",
+    nft: nftId.toString(),
+    actor_id: uaId.toString(),
+    sale_tx_id: saleTxId,
+    hcs_tx_id: hcsTxId,
+    timestamp: new Date().toISOString(),
+  });
+});

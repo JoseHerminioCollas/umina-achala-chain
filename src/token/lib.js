@@ -65,7 +65,7 @@ export function parseCreateArgs(argv) {
     return { problems: [err.message] };
   }
   const input = {
-    envFile: positionals[0] ?? ".env.testnet",
+    envFile: positionals[0], // undefined: the network's own env file
     tokenClass: values.token ?? "umina",
     dryRun: Boolean(values["dry-run"]),
   };

@@ -43,9 +43,7 @@
  * does all the checks, prints the event and sends nothing.
  */
 
-import dotenv from "dotenv";
 import fs from "fs";
-import { Client } from "@hashgraph/sdk";
 import {
   checkProof,
   consensusDate,
@@ -61,17 +59,12 @@ import {
 } from "./lib.js";
 import { accountKey, nftInfo, topicEvents, transactionRecord } from "../mirror.js";
 import { buildEvent, loadSubmitKey, submitEvent } from "../hcs.js";
-import { parseEcdsaKey } from "../keys.js";
 import { achalaSaleFields, achalaSalePlan, mintOfSerial } from "../mint/achala.js";
 import { TOKEN_CLASSES } from "../token/lib.js";
+import { fail, loadEnv, runScript } from "../script.js";
 
-dotenv.config({ path: ".env.testnet" });
+loadEnv();
 
-function fail(problems) {
-  console.error("❌ Problems found:");
-  problems.forEach((p) => console.error(`   - ${p}`));
-  process.exitCode = 1;
-}
 
 /** Checks a sale against the topic and the ledger; returns the event or problems. */
 async function prepareSale(input, env, events) {
@@ -185,62 +178,49 @@ async function prepareDelivery(input, env, events) {
   };
 }
 
-async function main() {
-  let client;
+runScript("Recording failed", async (session) => {
+  // --- 1. Check the arguments and the environment ---
+  const input = parseRecordArgs(process.argv.slice(2));
+  // An unknown --token is already in input.problems; check the env as for an Umiña then
+  const envClass = Object.hasOwn(TOKEN_CLASSES, input.tokenClass ?? "") ? input.tokenClass : "umina";
+  const problems = [...input.problems, ...recordEnvProblems(process.env, envClass)];
+  if (problems.length) return fail(problems);
+
+  // --- 2. Read the topic, then check the event against it and the ledger ---
+  let events;
   try {
-    // --- 1. Check the arguments and the environment ---
-    const input = parseRecordArgs(process.argv.slice(2));
-    // An unknown --token is already in input.problems; check the env as for an Umiña then
-    const envClass = Object.hasOwn(TOKEN_CLASSES, input.tokenClass ?? "") ? input.tokenClass : "umina";
-    const problems = [...input.problems, ...recordEnvProblems(process.env, envClass)];
-    if (problems.length) return fail(problems);
-
-    // --- 2. Read the topic, then check the event against it and the ledger ---
-    let events;
-    try {
-      events = await topicEvents(process.env.HCS_TOPIC_ID);
-    } catch (err) {
-      return fail([`cannot read HCS_TOPIC_ID ${process.env.HCS_TOPIC_ID}: ${err.message}`]);
-    }
-    const prepared =
-      input.command === "sale"
-        ? await prepareSale(input, process.env, events)
-        : await prepareDelivery(input, process.env, events);
-    if (prepared.problems) return fail(prepared.problems);
-    console.log(`✅ The ledger agrees. ${prepared.event.event} event:`);
-    console.log(JSON.stringify(prepared.event, null, 2));
-
-    if (input.dryRun) {
-      if (prepared.proofMessage) {
-        console.log(`Delivery message for the buyer to sign: "${prepared.proofMessage}"`);
-      }
-      console.log("Dry run, nothing sent.");
-      return;
-    }
-
-    // --- 3. Record it (UA pays; signed with the submit key when set) ---
-    client = Client.forTestnet().setOperator(
-      process.env.OPERATOR_ID,
-      parseEcdsaKey(process.env.OPERATOR_KEY),
-    );
-    const hcsTxId = await submitEvent(
-      client,
-      process.env.HCS_TOPIC_ID,
-      prepared.event,
-      loadSubmitKey(process.env),
-    );
-    console.table({
-      event: prepared.event.event,
-      nft: `${prepared.event.token_id}/${input.serial}`,
-      ref: prepared.event.ref,
-      hcs_tx_id: hcsTxId,
-    });
+    events = await topicEvents(process.env.HCS_TOPIC_ID);
   } catch (err) {
-    console.error("❌ Recording failed:", err);
-    process.exitCode = 1;
-  } finally {
-    client?.close();
+    return fail([`cannot read HCS_TOPIC_ID ${process.env.HCS_TOPIC_ID}: ${err.message}`]);
   }
-}
+  const prepared =
+    input.command === "sale"
+      ? await prepareSale(input, process.env, events)
+      : await prepareDelivery(input, process.env, events);
+  if (prepared.problems) return fail(prepared.problems);
+  console.log(`✅ The ledger agrees. ${prepared.event.event} event:`);
+  console.log(JSON.stringify(prepared.event, null, 2));
 
-main();
+  if (input.dryRun) {
+    if (prepared.proofMessage) {
+      console.log(`Delivery message for the buyer to sign: "${prepared.proofMessage}"`);
+    }
+    console.log("Dry run, nothing sent.");
+    return;
+  }
+
+  // --- 3. Record it (UA pays; signed with the submit key when set) ---
+  const client = session.connect();
+  const hcsTxId = await submitEvent(
+    client,
+    process.env.HCS_TOPIC_ID,
+    prepared.event,
+    loadSubmitKey(process.env),
+  );
+  console.table({
+    event: prepared.event.event,
+    nft: `${prepared.event.token_id}/${input.serial}`,
+    ref: prepared.event.ref,
+    hcs_tx_id: hcsTxId,
+  });
+});

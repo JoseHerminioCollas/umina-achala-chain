@@ -186,7 +186,7 @@ describe("createTopic.js", () => {
 
     expect(calls.dotenv).not.toHaveBeenCalled();
     expect(console.error).toHaveBeenCalledWith(
-      "❌ .env.mainnet is not a testnet env file. This script is testnet only; mainnet support is not built yet.",
+      "   - .env.mainnet is not a testnet env file (NETWORK is testnet)",
     );
     expect(process.exitCode).toBe(1);
   });

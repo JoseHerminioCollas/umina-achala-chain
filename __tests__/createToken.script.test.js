@@ -206,11 +206,8 @@ describe("createToken.js", () => {
     mockDependencies({ executeError: new Error("INSUFFICIENT_PAYER_BALANCE") });
     await runScript();
 
-    expect(console.error).toHaveBeenCalledWith(
-      "❌ Token creation failed:",
-      expect.any(Error),
-      { operatorId: "0.0.1001", treasuryAccountId: "0.0.1001" },
-    );
+    expect(console.error).toHaveBeenCalledWith("❌ Token creation failed:", expect.any(Error));
+    expect(console.error).toHaveBeenCalledWith("   Operator 0.0.1001, treasury 0.0.1001");
     expect(calls.close).toHaveBeenCalled();
     expect(process.exitCode).toBe(1);
   });

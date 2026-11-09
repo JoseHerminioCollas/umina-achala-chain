@@ -1,9 +1,10 @@
 /**
  * @file endConsignment.js
- * @description Ends the consignment of an Umiña NFT serial on Hedera TESTNET
- * (umina-achala-chain#18): the merchant revokes UA's allowance on the serial,
- * and, unless --keep is given, sends the NFT back to the Treasury. A return is
- * recorded in HCS as TRANSFER with reason "consignment_ended" (#10).
+ * @description Ends the consignment of an Umiña NFT serial on Hedera (NETWORK,
+ * testnet by default) (umina-achala-chain#18): the merchant revokes UA's
+ * allowance on the serial, and, unless --keep is given, sends the NFT back to
+ * the Treasury. A return is recorded in HCS as TRANSFER with reason
+ * "consignment_ended" (#10).
  *
  * Run from the command line:
  * node src/consignment/endConsignment.js <serial> [--keep] [--dry-run]
@@ -21,11 +22,9 @@
  * merchant signing. In production the merchant signs in their own wallet.
  */
 
-import dotenv from "dotenv";
 import {
   AccountAllowanceDeleteTransaction,
   AccountId,
-  Client,
   NftId,
   TokenId,
   TokenNftInfoQuery,
@@ -34,12 +33,13 @@ import {
 import { consignmentProblems } from "./lib.js";
 import { parseEcdsaKey } from "../keys.js";
 import { buildEvent, loadSubmitKey, submitEvent, submitKeyProblem } from "../hcs.js";
+import { fail, loadEnv, runScript } from "../script.js";
 
 const args = process.argv.slice(2);
 const dryRun = args.includes("--dry-run");
 const keep = args.includes("--keep");
 const serial = args.find((a) => !a.startsWith("--"));
-dotenv.config({ path: ".env.testnet" });
+loadEnv();
 
 const REQUIRED = [
   "OPERATOR_ID",
@@ -51,107 +51,91 @@ const REQUIRED = [
   "MERCHANT_KEY",
 ];
 
-async function main() {
-  let client;
-  let returnTxId;
-  try {
-    // --- 1. Check the arguments and environment ---
-    const problems = consignmentProblems(process.env, REQUIRED, serial);
-    const submitProblem = submitKeyProblem(process.env);
-    if (submitProblem) problems.push(submitProblem);
-    if (problems.length) {
-      console.error("❌ Problems found:");
-      problems.forEach((p) => console.error(`   - ${p}`));
-      process.exitCode = 1;
-      return;
-    }
+let returnTxId;
 
-    const operatorId = AccountId.fromString(process.env.OPERATOR_ID);
-    const treasuryId = AccountId.fromString(process.env.TREASURY_ID);
-    const merchantId = AccountId.fromString(process.env.MERCHANT_ID);
-    const tokenId = TokenId.fromString(process.env.UMINA_TOKEN_ID);
-    const nftId = new NftId(tokenId, Number(serial));
-    const merchantKey = parseEcdsaKey(process.env.MERCHANT_KEY);
+runScript("Ending the consignment failed", async (session) => {
+  // --- 1. Check the arguments and environment ---
+  const problems = consignmentProblems(process.env, REQUIRED, serial);
+  const submitProblem = submitKeyProblem(process.env);
+  if (submitProblem) problems.push(submitProblem);
+  if (problems.length) return fail(problems);
 
-    if (dryRun) {
-      console.log(`Would revoke ${operatorId}'s allowance on ${nftId} for ${merchantId}`);
-      if (keep) {
-        console.log(`Would leave ${nftId} with ${merchantId} (--keep); no event recorded`);
-      } else {
-        console.log(`Would return ${nftId} from ${merchantId} to ${treasuryId}`);
-        console.log(`Would record TRANSFER (consignment_ended) in ${process.env.HCS_TOPIC_ID}`);
-      }
-      console.log("Dry run, nothing sent.");
-      return;
-    }
+  const operatorId = AccountId.fromString(process.env.OPERATOR_ID);
+  const treasuryId = AccountId.fromString(process.env.TREASURY_ID);
+  const merchantId = AccountId.fromString(process.env.MERCHANT_ID);
+  const tokenId = TokenId.fromString(process.env.UMINA_TOKEN_ID);
+  const nftId = new NftId(tokenId, Number(serial));
+  const merchantKey = parseEcdsaKey(process.env.MERCHANT_KEY);
 
-    // --- 2. Connect to Hedera testnet (UA pays the fees) ---
-    client = Client.forTestnet().setOperator(
-      operatorId,
-      parseEcdsaKey(process.env.OPERATOR_KEY),
-    );
-
-    // --- 3. Check the merchant still holds the serial ---
-    const [info] = await new TokenNftInfoQuery().setNftId(nftId).execute(client);
-    if (info.accountId.toString() !== merchantId.toString()) {
-      console.error(
-        `❌ ${nftId} is held by ${info.accountId}, not the merchant ${merchantId}. Nothing to end.`,
-      );
-      process.exitCode = 1;
-      return;
-    }
-
-    // --- 4. Merchant revokes UA's allowance on this serial (merchant signs) ---
-    const revokeTx = await new AccountAllowanceDeleteTransaction()
-      .deleteAllTokenNftAllowances(nftId, merchantId)
-      .freezeWith(client)
-      .sign(merchantKey);
-    const revokeResponse = await revokeTx.execute(client);
-    const revokeReceipt = await revokeResponse.getReceipt(client);
-    console.log(`✅ ${operatorId} may no longer sell ${nftId}: ${revokeReceipt.status}`);
-
+  if (dryRun) {
+    console.log(`Would revoke ${operatorId}'s allowance on ${nftId} for ${merchantId}`);
     if (keep) {
-      console.log(`ℹ️  ${nftId} stays with ${merchantId} (--keep); ownership did not change, no event recorded.`);
-      return;
+      console.log(`Would leave ${nftId} with ${merchantId} (--keep); no event recorded`);
+    } else {
+      console.log(`Would return ${nftId} from ${merchantId} to ${treasuryId}`);
+      console.log(`Would record TRANSFER (consignment_ended) in ${process.env.HCS_TOPIC_ID}`);
     }
-
-    // --- 5. Merchant returns the NFT to the Treasury (merchant signs) ---
-    const returnTx = await new TransferTransaction()
-      .addNftTransfer(nftId, merchantId, treasuryId)
-      .freezeWith(client)
-      .sign(merchantKey);
-    const returnResponse = await returnTx.execute(client);
-    const returnReceipt = await returnResponse.getReceipt(client);
-    returnTxId = returnResponse.transactionId.toString();
-    console.log(`✅ ${nftId} returned to ${treasuryId}: ${returnReceipt.status} (${returnTxId})`);
-
-    // --- 6. Record the return in HCS ---
-    const message = buildEvent(
-      { event: "TRANSFER", tokenId, serials: [serial], actorId: operatorId, ref: returnTxId },
-      {
-        from_id: merchantId.toString(),
-        to_id: treasuryId.toString(),
-        reason: "consignment_ended",
-      },
-    );
-    const hcsTxId = await submitEvent(
-      client,
-      process.env.HCS_TOPIC_ID,
-      message,
-      loadSubmitKey(process.env),
-    );
-    console.log(`✅ TRANSFER recorded: ${hcsTxId}`);
-  } catch (err) {
-    console.error("❌ Ending the consignment failed:", err);
-    if (returnTxId) {
-      console.error(
-        `   The NFT already went back to the Treasury in ${returnTxId}, but TRANSFER was not recorded.`,
-      );
-    }
-    process.exitCode = 1;
-  } finally {
-    client?.close();
+    console.log("Dry run, nothing sent.");
+    return;
   }
-}
 
-main();
+  // --- 2. Connect to Hedera (UA pays the fees) ---
+  const client = session.connect();
+
+  // --- 3. Check the merchant still holds the serial ---
+  const [info] = await new TokenNftInfoQuery().setNftId(nftId).execute(client);
+  if (info.accountId.toString() !== merchantId.toString()) {
+    console.error(
+      `❌ ${nftId} is held by ${info.accountId}, not the merchant ${merchantId}. Nothing to end.`,
+    );
+    process.exitCode = 1;
+    return;
+  }
+
+  // --- 4. Merchant revokes UA's allowance on this serial (merchant signs) ---
+  const revokeTx = await new AccountAllowanceDeleteTransaction()
+    .deleteAllTokenNftAllowances(nftId, merchantId)
+    .freezeWith(client)
+    .sign(merchantKey);
+  const revokeResponse = await revokeTx.execute(client);
+  const revokeReceipt = await revokeResponse.getReceipt(client);
+  console.log(`✅ ${operatorId} may no longer sell ${nftId}: ${revokeReceipt.status}`);
+
+  if (keep) {
+    console.log(`ℹ️  ${nftId} stays with ${merchantId} (--keep); ownership did not change, no event recorded.`);
+    return;
+  }
+
+  // --- 5. Merchant returns the NFT to the Treasury (merchant signs) ---
+  const returnTx = await new TransferTransaction()
+    .addNftTransfer(nftId, merchantId, treasuryId)
+    .freezeWith(client)
+    .sign(merchantKey);
+  const returnResponse = await returnTx.execute(client);
+  const returnReceipt = await returnResponse.getReceipt(client);
+  returnTxId = returnResponse.transactionId.toString();
+  console.log(`✅ ${nftId} returned to ${treasuryId}: ${returnReceipt.status} (${returnTxId})`);
+
+  // --- 6. Record the return in HCS ---
+  const message = buildEvent(
+    { event: "TRANSFER", tokenId, serials: [serial], actorId: operatorId, ref: returnTxId },
+    {
+      from_id: merchantId.toString(),
+      to_id: treasuryId.toString(),
+      reason: "consignment_ended",
+    },
+  );
+  const hcsTxId = await submitEvent(
+    client,
+    process.env.HCS_TOPIC_ID,
+    message,
+    loadSubmitKey(process.env),
+  );
+  console.log(`✅ TRANSFER recorded: ${hcsTxId}`);
+}, () => {
+  if (returnTxId) {
+    console.error(
+      `   The NFT already went back to the Treasury in ${returnTxId}, but TRANSFER was not recorded.`,
+    );
+  }
+});

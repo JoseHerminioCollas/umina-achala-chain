@@ -1,10 +1,11 @@
 /**
  * @file mirror.js
- * @description Reads from the Hedera testnet mirror node (public REST API, no
+ * @description Reads from the mirror node of the network (testnet unless
+ * NETWORK says otherwise; public REST API, no
  * key needed). Shared by the scripts that check the ledger before acting.
  */
 
-export const MIRROR_NODE = "https://testnet.mirrornode.hedera.com";
+import { mirrorNode } from "./network.js";
 
 const TX_ID = /^(0\.0\.\d+)[@-](\d+)[.-](\d{1,9})$/;
 
@@ -26,7 +27,7 @@ export function mirrorTxId(id) {
 
 /** GETs a mirror node path; returns the JSON, or null on 404. */
 async function getJson(pathAndQuery, fetchFn) {
-  const response = await fetchFn(`${MIRROR_NODE}${pathAndQuery}`);
+  const response = await fetchFn(`${mirrorNode()}${pathAndQuery}`);
   if (response.status === 404) return null;
   if (!response.ok) {
     throw new Error(`mirror node request failed: ${response.status} ${await response.text()}`);
@@ -98,7 +99,7 @@ export async function topicEvents(topicId, fetchFn = fetch) {
   const events = [];
   let next = `/api/v1/topics/${topicId}/messages?limit=100&order=asc`;
   while (next) {
-    const response = await fetchFn(`${MIRROR_NODE}${next}`);
+    const response = await fetchFn(`${mirrorNode()}${next}`);
     if (response.status === 404) {
       throw new Error(`HCS topic ${topicId} was not found on the mirror node`);
     }

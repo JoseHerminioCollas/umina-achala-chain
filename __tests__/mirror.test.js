@@ -1,7 +1,6 @@
 import { jest } from "@jest/globals";
 import {
   accountKey,
-  MIRROR_NODE,
   mirrorTxId,
   nftInfo,
   normalizeTxId,
@@ -9,6 +8,9 @@ import {
   topicInfo,
   transactionRecord,
 } from "../src/mirror.js";
+import { mirrorNode } from "../src/network.js";
+
+const MIRROR_NODE = mirrorNode();
 
 const json = (status, body) =>
   jest.fn().mockResolvedValue({ ok: status === 200, status, json: async () => body, text: async () => "err" });

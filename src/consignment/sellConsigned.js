@@ -1,9 +1,10 @@
 /**
  * @file sellConsigned.js
- * @description Sells a consigned Umiña NFT on Hedera TESTNET in one atomic
- * transfer: the buyer pays the price in HBAR to the merchant and UA, and UA
- * moves the NFT from the merchant to the buyer using the merchant's allowance
- * (see consignToMerchant.js). The sale is then notarized in HCS.
+ * @description Sells a consigned Umiña NFT on Hedera (NETWORK, testnet by
+ * default) in one atomic transfer: the buyer pays the price in HBAR to the
+ * merchant and UA, and UA moves the NFT from the merchant to the buyer using
+ * the merchant's allowance (see consignToMerchant.js). The sale is then
+ * notarized in HCS.
  *
  * The merchant ends with 70% and UA with 30%, the royalty included
  * (umina-achala-chain#30): HTS takes the 5% royalty from the merchant's leg
@@ -19,10 +20,8 @@
  * Umiña token.
  */
 
-import dotenv from "dotenv";
 import {
   AccountId,
-  Client,
   Hbar,
   NftId,
   TokenId,
@@ -33,11 +32,12 @@ import {
 import { consignmentProblems, consignmentSplit } from "./lib.js";
 import { buildEvent, loadSubmitKey, submitEvent, submitKeyProblem } from "../hcs.js";
 import { parseEcdsaKey } from "../keys.js";
+import { fail, loadEnv, runScript } from "../script.js";
 
 const args = process.argv.slice(2);
 const dryRun = args.includes("--dry-run");
 const [serial, price] = args.filter((a) => !a.startsWith("--"));
-dotenv.config({ path: ".env.testnet" });
+loadEnv();
 
 const REQUIRED = [
   "OPERATOR_ID",
@@ -51,133 +51,115 @@ const REQUIRED = [
 
 const tinybars = (n) => Hbar.fromTinybars(n.toString());
 
-async function main() {
-  let client;
-  try {
-    // --- 1. Check the arguments and environment ---
-    const problems = consignmentProblems(process.env, REQUIRED, serial);
-    if (!(Number(price) > 0)) problems.push("give the price in HBAR as a positive number");
-    const submitProblem = submitKeyProblem(process.env);
-    if (submitProblem) problems.push(submitProblem);
-    if (problems.length) {
-      console.error("❌ Problems found:");
-      problems.forEach((p) => console.error(`   - ${p}`));
-      process.exitCode = 1;
-      return;
-    }
+runScript("Sale failed", async (session) => {
+  // --- 1. Check the arguments and environment ---
+  const problems = consignmentProblems(process.env, REQUIRED, serial);
+  if (!(Number(price) > 0)) problems.push("give the price in HBAR as a positive number");
+  const submitProblem = submitKeyProblem(process.env);
+  if (submitProblem) problems.push(submitProblem);
+  if (problems.length) return fail(problems);
 
-    const uaId = AccountId.fromString(process.env.OPERATOR_ID);
-    const merchantId = AccountId.fromString(process.env.MERCHANT_ID);
-    const buyerId = AccountId.fromString(process.env.BUYER_ID);
-    const tokenId = TokenId.fromString(process.env.UMINA_TOKEN_ID);
-    const nftId = new NftId(tokenId, Number(serial));
-    const buyerKey = parseEcdsaKey(process.env.BUYER_KEY);
+  const uaId = AccountId.fromString(process.env.OPERATOR_ID);
+  const merchantId = AccountId.fromString(process.env.MERCHANT_ID);
+  const buyerId = AccountId.fromString(process.env.BUYER_ID);
+  const tokenId = TokenId.fromString(process.env.UMINA_TOKEN_ID);
+  const nftId = new NftId(tokenId, Number(serial));
+  const buyerKey = parseEcdsaKey(process.env.BUYER_KEY);
 
-    const priceTinybars = BigInt(new Hbar(Number(price)).toTinybars().toString());
-    const split = consignmentSplit(priceTinybars);
-    console.log(`Sale of ${nftId} for ${tinybars(priceTinybars)}:`);
-    console.table({
-      merchant: {
-        paid: tinybars(split.merchant).toString(),
-        after_royalty: tinybars(split.merchantNet).toString(),
-      },
-      ua: { paid: tinybars(split.ua).toString(), after_royalty: tinybars(split.uaNet).toString() },
-    });
+  const priceTinybars = BigInt(new Hbar(Number(price)).toTinybars().toString());
+  const split = consignmentSplit(priceTinybars);
+  console.log(`Sale of ${nftId} for ${tinybars(priceTinybars)}:`);
+  console.table({
+    merchant: {
+      paid: tinybars(split.merchant).toString(),
+      after_royalty: tinybars(split.merchantNet).toString(),
+    },
+    ua: { paid: tinybars(split.ua).toString(), after_royalty: tinybars(split.uaNet).toString() },
+  });
 
-    if (dryRun) {
-      console.log("Dry run, nothing sent.");
-      return;
-    }
-
-    // --- 2. Connect to Hedera testnet as UA ---
-    client = Client.forTestnet().setOperator(
-      uaId,
-      parseEcdsaKey(process.env.OPERATOR_KEY),
-    );
-
-    // --- 3. Check the merchant still holds the serial ---
-    // A sale on another marketplace would have moved it; fail early with a
-    // clear message instead of a network error.
-    const [info] = await new TokenNftInfoQuery().setNftId(nftId).execute(client);
-    if (info.accountId.toString() !== merchantId.toString()) {
-      console.error(
-        `❌ ${nftId} is held by ${info.accountId}, not ${merchantId}. Remove the listing.`,
-      );
-      process.exitCode = 1;
-      return;
-    }
-
-    // --- 4. One atomic transfer: payment split + NFT via allowance ---
-    // UA is the payer, which makes it the allowance spender for the
-    // approved NFT transfer. HBAR amounts must net to zero.
-    const saleTx = await new TransferTransaction()
-      .setTransactionId(TransactionId.generate(uaId))
-      .addHbarTransfer(buyerId, tinybars(-priceTinybars))
-      .addHbarTransfer(merchantId, tinybars(split.merchant))
-      .addHbarTransfer(uaId, tinybars(split.ua))
-      .addApprovedNftTransfer(nftId, merchantId, buyerId)
-      .setTransactionMemo(`Umiña sale ${nftId}`)
-      .freezeWith(client)
-      .sign(buyerKey); // UA signs as operator on execute
-    const saleResponse = await saleTx.execute(client);
-    const saleReceipt = await saleResponse.getReceipt(client);
-    const saleTxId = saleResponse.transactionId.toString();
-    console.log(`✅ Sold ${nftId} to ${buyerId}: ${saleReceipt.status} (${saleTxId})`);
-
-    // --- 5. Notarize the sale in HCS ---
-    // The sale has settled, so if this fails say so and keep what is needed
-    // to notarize it by hand. submitEvent waits for the receipt, so a message
-    // rejected at consensus lands here too. SALE fields follow the event
-    // catalog in umina-achala-chain#10; the split is kept in tinybars, as the
-    // legs paid (the merchant's before HTS takes the royalty from it, #30).
-    let hcsTxId;
-    try {
-      const message = buildEvent(
-        {
-          event: "SALE",
-          tokenId,
-          serials: [serial],
-          actorId: uaId,
-          ref: saleTxId,
-        },
-        {
-          seller_id: merchantId.toString(),
-          buyer_id: buyerId.toString(),
-          payment: "on_chain",
-          sold_for: tinybars(priceTinybars).toBigNumber().toString(),
-          currency: "HBAR",
-          price_tinybars: priceTinybars.toString(),
-          merchant_tinybars: split.merchant.toString(),
-          ua_tinybars: split.ua.toString(),
-        },
-      );
-      hcsTxId = await submitEvent(
-        client,
-        process.env.HCS_TOPIC_ID,
-        message,
-        loadSubmitKey(process.env),
-      );
-    } catch (err) {
-      console.error(`❌ Sale ${saleTxId} settled but the HCS notarization failed:`, err);
-      process.exitCode = 1;
-      return;
-    }
-
-    // --- 6. Provenance logging ---
-    console.table({
-      event: "SALE",
-      nft: nftId.toString(),
-      actor_id: uaId.toString(),
-      sale_tx_id: saleTxId,
-      hcs_tx_id: hcsTxId,
-      timestamp: new Date().toISOString(),
-    });
-  } catch (err) {
-    console.error("❌ Sale failed:", err);
-    process.exitCode = 1;
-  } finally {
-    client?.close();
+  if (dryRun) {
+    console.log("Dry run, nothing sent.");
+    return;
   }
-}
 
-main();
+  // --- 2. Connect to Hedera as UA ---
+  const client = session.connect();
+
+  // --- 3. Check the merchant still holds the serial ---
+  // A sale on another marketplace would have moved it; fail early with a
+  // clear message instead of a network error.
+  const [info] = await new TokenNftInfoQuery().setNftId(nftId).execute(client);
+  if (info.accountId.toString() !== merchantId.toString()) {
+    console.error(
+      `❌ ${nftId} is held by ${info.accountId}, not ${merchantId}. Remove the listing.`,
+    );
+    process.exitCode = 1;
+    return;
+  }
+
+  // --- 4. One atomic transfer: payment split + NFT via allowance ---
+  // UA is the payer, which makes it the allowance spender for the
+  // approved NFT transfer. HBAR amounts must net to zero.
+  const saleTx = await new TransferTransaction()
+    .setTransactionId(TransactionId.generate(uaId))
+    .addHbarTransfer(buyerId, tinybars(-priceTinybars))
+    .addHbarTransfer(merchantId, tinybars(split.merchant))
+    .addHbarTransfer(uaId, tinybars(split.ua))
+    .addApprovedNftTransfer(nftId, merchantId, buyerId)
+    .setTransactionMemo(`Umiña sale ${nftId}`)
+    .freezeWith(client)
+    .sign(buyerKey); // UA signs as operator on execute
+  const saleResponse = await saleTx.execute(client);
+  const saleReceipt = await saleResponse.getReceipt(client);
+  const saleTxId = saleResponse.transactionId.toString();
+  console.log(`✅ Sold ${nftId} to ${buyerId}: ${saleReceipt.status} (${saleTxId})`);
+
+  // --- 5. Notarize the sale in HCS ---
+  // The sale has settled, so if this fails say so and keep what is needed
+  // to notarize it by hand. submitEvent waits for the receipt, so a message
+  // rejected at consensus lands here too. SALE fields follow the event
+  // catalog in umina-achala-chain#10; the split is kept in tinybars, as the
+  // legs paid (the merchant's before HTS takes the royalty from it, #30).
+  let hcsTxId;
+  try {
+    const message = buildEvent(
+      {
+        event: "SALE",
+        tokenId,
+        serials: [serial],
+        actorId: uaId,
+        ref: saleTxId,
+      },
+      {
+        seller_id: merchantId.toString(),
+        buyer_id: buyerId.toString(),
+        payment: "on_chain",
+        sold_for: tinybars(priceTinybars).toBigNumber().toString(),
+        currency: "HBAR",
+        price_tinybars: priceTinybars.toString(),
+        merchant_tinybars: split.merchant.toString(),
+        ua_tinybars: split.ua.toString(),
+      },
+    );
+    hcsTxId = await submitEvent(
+      client,
+      process.env.HCS_TOPIC_ID,
+      message,
+      loadSubmitKey(process.env),
+    );
+  } catch (err) {
+    console.error(`❌ Sale ${saleTxId} settled but the HCS notarization failed:`, err);
+    process.exitCode = 1;
+    return;
+  }
+
+  // --- 6. Provenance logging ---
+  console.table({
+    event: "SALE",
+    nft: nftId.toString(),
+    actor_id: uaId.toString(),
+    sale_tx_id: saleTxId,
+    hcs_tx_id: hcsTxId,
+    timestamp: new Date().toISOString(),
+  });
+});
