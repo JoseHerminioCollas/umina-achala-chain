@@ -40,8 +40,8 @@ describe("validateEnv", () => {
     delete env.SUPPLY_KEY;
     delete env.OPERATOR_ID;
     const problems = validateEnv(env);
-    expect(problems).toContain("SUPPLY_KEY is missing");
-    expect(problems).toContain("OPERATOR_ID is missing");
+    expect(problems).toContain("SUPPLY_KEY is not set");
+    expect(problems).toContain("OPERATOR_ID is not set");
   });
 
   test("rejects an account id that is not 0.0.N", () => {
@@ -64,7 +64,7 @@ describe("validateEnv", () => {
   test("requires a positive FALLBACK_FEE_HBAR", () => {
     const env = makeEnv();
     delete env.FALLBACK_FEE_HBAR;
-    expect(validateEnv(env)).toContain("FALLBACK_FEE_HBAR is missing");
+    expect(validateEnv(env)).toContain("FALLBACK_FEE_HBAR is not set");
     for (const bad of ["0", "-3", "abc", "3 USD", "1.123456789"]) {
       expect(validateEnv(makeEnv({ FALLBACK_FEE_HBAR: bad })).join()).toMatch(
         /FALLBACK_FEE_HBAR must be a positive HBAR amount/,

@@ -440,8 +440,8 @@ describe("mintNFT.js", () => {
     mockDependencies();
     await runScript(writeMetadata());
 
-    expect(console.error).toHaveBeenCalledWith("   - HCS_TOPIC_ID is missing");
-    expect(console.error).toHaveBeenCalledWith("   - PINATA_JWT is missing");
+    expect(console.error).toHaveBeenCalledWith("   - HCS_TOPIC_ID is not set");
+    expect(console.error).toHaveBeenCalledWith("   - PINATA_JWT is not set");
     expect(calls.order).toEqual([]);
     expect(calls.forTestnet).not.toHaveBeenCalled();
     expect(process.exitCode).toBe(1);
@@ -1016,8 +1016,8 @@ describe("mintNFT.js", () => {
     mockDependencies();
     await runScript(writeAchala(), "--token", "achala", "--dry-run");
 
-    expect(console.error).toHaveBeenCalledWith("   - ACHALA_TOKEN_ID is missing");
-    expect(console.error).toHaveBeenCalledWith("   - TREASURY_ID is missing");
+    expect(console.error).toHaveBeenCalledWith("   - ACHALA_TOKEN_ID is not set");
+    expect(console.error).toHaveBeenCalledWith("   - TREASURY_ID is not set");
     expect(process.exitCode).toBe(1);
   });
 

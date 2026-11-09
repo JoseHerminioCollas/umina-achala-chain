@@ -11,6 +11,7 @@ import {
   TokenAssociateTransaction,
 } from "@hashgraph/sdk";
 import { ROYALTY, TOKEN_CLASSES } from "../token/lib.js";
+import { envProblems, serialProblem } from "../env.js";
 
 /** Test accounts that can associate the token, by role (env var prefix). */
 export const ROLES = { merchant: "MERCHANT", buyer: "BUYER" };
@@ -70,10 +71,9 @@ export function consignmentSplit(priceTinybars, royalty = ROYALTY) {
  * @returns {string[]}
  */
 export function consignmentProblems(env, required, serial) {
-  const problems = required.filter((k) => !env[k]).map((k) => `${k} is not set`);
-  if (!/^[1-9]\d*$/.test(serial ?? "")) {
-    problems.push("give the NFT serial number as a positive integer");
-  }
+  const problems = envProblems(env, required);
+  const bad = serialProblem(serial);
+  if (bad) problems.push(bad);
   return problems;
 }
 
@@ -87,9 +87,13 @@ export function consignmentProblems(env, required, serial) {
 export function roleProblems(env, role, tokenClass = "umina") {
   const prefix = ROLES[role];
   if (!prefix) return [`give the role: ${Object.keys(ROLES).join(" or ")}`];
-  return ["OPERATOR_ID", "OPERATOR_KEY", TOKEN_CLASSES[tokenClass].envVar, `${prefix}_ID`, `${prefix}_KEY`]
-    .filter((k) => !env[k])
-    .map((k) => `${k} is not set`);
+  return envProblems(env, [
+    "OPERATOR_ID",
+    "OPERATOR_KEY",
+    TOKEN_CLASSES[tokenClass].envVar,
+    `${prefix}_ID`,
+    `${prefix}_KEY`,
+  ]);
 }
 
 /**

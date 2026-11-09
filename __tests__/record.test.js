@@ -125,7 +125,7 @@ describe("parseRecordArgs", () => {
 });
 
 describe("recordEnvProblems", () => {
-  const env = { OPERATOR_ID: "0.0.1001", OPERATOR_KEY: "k", UMINA_TOKEN_ID: TOKEN, HCS_TOPIC_ID: "0.0.3003" };
+  const env = { OPERATOR_ID: "0.0.1001", OPERATOR_KEY: PrivateKey.generateECDSA().toStringDer(), UMINA_TOKEN_ID: TOKEN, HCS_TOPIC_ID: "0.0.3003" };
 
   test("accepts a complete environment", () => {
     expect(recordEnvProblems(env)).toEqual([]);

@@ -1,7 +1,10 @@
+import { PrivateKey } from "@hashgraph/sdk";
 import { consignmentProblems, consignmentSplit, roleProblems } from "../src/consignment/lib.js";
 
+const KEY = PrivateKey.generateECDSA().toStringDer();
+
 describe("roleProblems", () => {
-  const base = { OPERATOR_ID: "0.0.1", OPERATOR_KEY: "k", UMINA_TOKEN_ID: "0.0.9" };
+  const base = { OPERATOR_ID: "0.0.1", OPERATOR_KEY: KEY, UMINA_TOKEN_ID: "0.0.9" };
 
   test.each([undefined, "", "seller"])("rejects role %p", (role) => {
     expect(roleProblems(base, role)).toEqual(["give the role: merchant or buyer"]);
@@ -9,11 +12,11 @@ describe("roleProblems", () => {
 
   test("checks the variables for the given role", () => {
     expect(roleProblems(base, "buyer")).toEqual(["BUYER_ID is not set", "BUYER_KEY is not set"]);
-    expect(roleProblems({ ...base, MERCHANT_ID: "0.0.2", MERCHANT_KEY: "k" }, "merchant")).toEqual([]);
+    expect(roleProblems({ ...base, MERCHANT_ID: "0.0.2", MERCHANT_KEY: KEY }, "merchant")).toEqual([]);
   });
 
   test("associating the Achala token needs ACHALA_TOKEN_ID (umina-achala-chain#26)", () => {
-    const buyer = { ...base, BUYER_ID: "0.0.6", BUYER_KEY: "k" };
+    const buyer = { ...base, BUYER_ID: "0.0.6", BUYER_KEY: KEY };
     expect(roleProblems(buyer, "buyer", "achala")).toEqual(["ACHALA_TOKEN_ID is not set"]);
     expect(roleProblems({ ...buyer, ACHALA_TOKEN_ID: "0.0.8" }, "buyer", "achala")).toEqual([]);
   });

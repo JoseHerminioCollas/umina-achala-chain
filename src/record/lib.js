@@ -14,11 +14,10 @@ import crypto from "crypto";
 import { parseArgs } from "util";
 import { PublicKey } from "@hashgraph/sdk";
 import { normalizeTxId } from "../mirror.js";
+import { envProblems, idProblem, isHederaId } from "../env.js";
 import { submitKeyProblem } from "../hcs.js";
 import { TOKEN_CLASSES, tokenClassProblem } from "../token/lib.js";
 
-const ACCOUNT_ID = /^0\.0\.\d+$/;
-const TOKEN_ID = /^0\.0\.\d+$/;
 const HBAR_AMOUNT = /^\d+(\.\d{1,8})?$/;
 const AMOUNT = /^\d+(\.\d+)?$/;
 const CURRENCY = /^[A-Z]{3,5}$/;
@@ -89,8 +88,7 @@ export function parseRecordArgs(argv) {
   const account = (name) => {
     const value = values[name];
     if (!value) problems.push(`--${name} is required`);
-    else if (!ACCOUNT_ID.test(value))
-      problems.push(`--${name} must look like 0.0.1234, got "${value}"`);
+    else if (!isHederaId(value)) problems.push(idProblem(`--${name}`, value));
     return value;
   };
   input.buyer = account("buyer");
@@ -153,14 +151,7 @@ export function parseRecordArgs(argv) {
 export function recordEnvProblems(env, tokenClass = "umina") {
   const tokens = [TOKEN_CLASSES[tokenClass].envVar];
   if (tokenClass === "achala") tokens.push("UMINA_TOKEN_ID");
-  const problems = ["OPERATOR_ID", "OPERATOR_KEY", ...tokens, "HCS_TOPIC_ID"]
-    .filter((k) => !env[k])
-    .map((k) => `${k} is not set`);
-  for (const name of tokens) {
-    if (env[name] && !TOKEN_ID.test(env[name])) {
-      problems.push(`${name} must look like 0.0.1234, got "${env[name]}"`);
-    }
-  }
+  const problems = envProblems(env, ["OPERATOR_ID", "OPERATOR_KEY", ...tokens, "HCS_TOPIC_ID"]);
   const submitProblem = submitKeyProblem(env);
   if (submitProblem) problems.push(submitProblem);
   return problems;

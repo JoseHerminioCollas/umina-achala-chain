@@ -159,7 +159,7 @@ describe("createTopic.js", () => {
     mockDependencies();
     await runScript("provenance");
 
-    expect(console.error).toHaveBeenCalledWith("   - HCS_ADMIN_KEY is missing");
+    expect(console.error).toHaveBeenCalledWith("   - HCS_ADMIN_KEY is not set");
     expect(calls.executed).toBe(false);
     expect(process.exitCode).toBe(1);
   });

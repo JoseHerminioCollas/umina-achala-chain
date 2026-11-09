@@ -49,8 +49,8 @@ describe("validateTopicEnv", () => {
     delete env.HCS_SUBMIT_KEY;
     delete env.HCS_ADMIN_KEY;
     expect(validateTopicEnv(env, "provenance")).toEqual([
-      "HCS_SUBMIT_KEY is missing",
-      "HCS_ADMIN_KEY is missing",
+      "HCS_SUBMIT_KEY is not set",
+      "HCS_ADMIN_KEY is not set",
     ]);
   });
 

@@ -10,6 +10,7 @@
 
 import { TopicCreateTransaction } from "@hashgraph/sdk";
 import { parseEcdsaKey } from "../keys.js";
+import { envProblems, isHederaId } from "../env.js";
 import { topicInfo } from "../mirror.js";
 
 /** The two topics: the env variable that holds each ID, and its memo. */
@@ -18,7 +19,6 @@ export const TOPICS = {
   display: { envVar: "HCS_DISPLAY_TOPIC_ID", memo: "Umiña Achala display" },
 };
 
-const ACCOUNT_ID = /^0\.0\.\d+$/;
 const KEY_NAMES = ["OPERATOR_KEY", "HCS_SUBMIT_KEY", "HCS_ADMIN_KEY"];
 
 /**
@@ -32,20 +32,7 @@ export function validateTopicEnv(env, kind) {
   if (!TOPICS[kind]) {
     problems.push(`give the topic kind: ${Object.keys(TOPICS).join(" or ")}`);
   }
-  if (!env.OPERATOR_ID) problems.push("OPERATOR_ID is missing");
-  else if (!ACCOUNT_ID.test(env.OPERATOR_ID))
-    problems.push(`OPERATOR_ID must look like 0.0.1234, got "${env.OPERATOR_ID}"`);
-  for (const name of KEY_NAMES) {
-    if (!env[name]) {
-      problems.push(`${name} is missing`);
-      continue;
-    }
-    try {
-      parseEcdsaKey(env[name]);
-    } catch {
-      problems.push(`${name} is not an ECDSA private key (hex or DER)`);
-    }
-  }
+  problems.push(...envProblems(env, ["OPERATOR_ID", ...KEY_NAMES]));
   return problems;
 }
 
@@ -85,7 +72,7 @@ export function describeTopic(env, kind) {
 export async function existingTopicProblem(env, kind, fetchFn = fetch) {
   const { envVar } = TOPICS[kind];
   const topicId = env[envVar];
-  if (!topicId || !ACCOUNT_ID.test(topicId)) return null;
+  if (!isHederaId(topicId)) return null;
   const info = await topicInfo(topicId, fetchFn);
   if (!info || info.deleted) return null;
   return `${envVar} already names topic ${topicId} ("${info.memo}"). Use --force to create a new one anyway.`;

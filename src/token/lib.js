@@ -14,6 +14,7 @@ import {
   TokenType,
 } from "@hashgraph/sdk";
 import { parseEcdsaKey } from "../keys.js";
+import { envProblems, idProblem, isHederaId } from "../env.js";
 import { parseArgs } from "util";
 import { submitKeyProblem } from "../hcs.js";
 
@@ -77,7 +78,6 @@ export function parseCreateArgs(argv) {
 
 export const ROYALTY = { numerator: 5, denominator: 100 };
 
-const ACCOUNT_ID = /^0\.0\.\d+$/;
 // An HBAR amount with at most 8 decimals (1 tinybar = 0.00000001 HBAR)
 const HBAR_AMOUNT = /^\d+(\.\d{1,8})?$/;
 const ID_NAMES = ["OPERATOR_ID", "TREASURY_ID"];
@@ -98,16 +98,10 @@ const KEY_NAMES = [
  * fee in HBAR (about USD 3, converted on the day the token is created).
  */
 export function validateEnv(env) {
-  const problems = [];
-
-  for (const name of ID_NAMES) {
-    if (!env[name]) problems.push(`${name} is missing`);
-    else if (!ACCOUNT_ID.test(env[name]))
-      problems.push(`${name} must look like 0.0.1234, got "${env[name]}"`);
-  }
+  const problems = envProblems(env, ID_NAMES);
 
   const fallback = env.FALLBACK_FEE_HBAR;
-  if (!fallback) problems.push("FALLBACK_FEE_HBAR is missing");
+  if (!fallback) problems.push("FALLBACK_FEE_HBAR is not set");
   else if (!HBAR_AMOUNT.test(fallback) || Number(fallback) <= 0)
     problems.push(
       `FALLBACK_FEE_HBAR must be a positive HBAR amount such as 38 or 37.5, got "${fallback}"`,
@@ -119,18 +113,7 @@ export function validateEnv(env) {
       problems.push("TREASURY_KEY is required when TREASURY_ID is not OPERATOR_ID");
     else keyNames.push("TREASURY_KEY");
   }
-
-  for (const name of keyNames) {
-    if (!env[name]) {
-      problems.push(`${name} is missing`);
-      continue;
-    }
-    try {
-      parseEcdsaKey(env[name]);
-    } catch {
-      problems.push(`${name} is not an ECDSA private key (hex or DER)`);
-    }
-  }
+  problems.push(...envProblems(env, keyNames));
 
   return problems;
 }
@@ -291,8 +274,7 @@ export function parseAdminArgs(argv) {
   if (command === "wipe") {
     input.account = values.account;
     if (!input.account) problems.push("--account is required (the account that holds the serial)");
-    else if (!ACCOUNT_ID.test(input.account))
-      problems.push(`--account must look like 0.0.1234, got "${input.account}"`);
+    else if (!isHederaId(input.account)) problems.push(idProblem("--account", input.account));
   }
   return { ...input, problems };
 }
@@ -303,15 +285,7 @@ export function adminEnvProblems(env, command, tokenClass = "umina") {
   const needed = ["OPERATOR_ID", "OPERATOR_KEY", TOKEN_CLASSES[tokenClass].envVar, key];
   if (command === "fees" || command === "burn") needed.push("TREASURY_ID");
   if (records) needed.push("HCS_TOPIC_ID");
-  const problems = needed.filter((k) => !env[k]).map((k) => `${k} is not set`);
-  for (const name of ["OPERATOR_KEY", key]) {
-    if (!env[name]) continue;
-    try {
-      parseEcdsaKey(env[name]);
-    } catch {
-      problems.push(`${name} is not an ECDSA private key (hex or DER)`);
-    }
-  }
+  const problems = envProblems(env, needed);
   if (records) {
     const submitProblem = submitKeyProblem(env);
     if (submitProblem) problems.push(submitProblem);

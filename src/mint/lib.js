@@ -8,12 +8,11 @@
 import fs from "fs";
 import path from "path";
 import { parseArgs } from "util";
-import { parseEcdsaKey } from "../keys.js";
+import { envProblems } from "../env.js";
 import { submitKeyProblem } from "../hcs.js";
 import { MAX_OTHER_IMAGES } from "./images.js";
 import { TOKEN_CLASSES, tokenClassProblem } from "../token/lib.js";
 
-const HEDERA_ID = /^0\.0\.\d+$/;
 // UMINA-YYYY-XX-NN, for example UMINA-2026-CH-03 (CH = chrysocolla)
 export const STONE_ID = /^UMINA-\d{4}-[A-Z]{2}-\d{2,}$/;
 // ACHALA-YYYY-XX-NN, for example ACHALA-2026-RI-01 (RI = ring)
@@ -74,29 +73,9 @@ export const PINATA_PIN_FILE = "https://api.pinata.cloud/pinning/pinFileToIPFS";
  * to check its stones.
  */
 export function validateMintEnv(env, tokenClass = "umina") {
-  const problems = [];
-  const ids = ["OPERATOR_ID", TOKEN_CLASSES[tokenClass].envVar, "HCS_TOPIC_ID"];
-  if (tokenClass === "achala") ids.push("UMINA_TOKEN_ID", "TREASURY_ID");
-
-  for (const name of ids) {
-    if (!env[name]) problems.push(`${name} is missing`);
-    else if (!HEDERA_ID.test(env[name]))
-      problems.push(`${name} must look like 0.0.1234, got "${env[name]}"`);
-  }
-
-  for (const name of ["OPERATOR_KEY", "SUPPLY_KEY"]) {
-    if (!env[name]) {
-      problems.push(`${name} is missing`);
-      continue;
-    }
-    try {
-      parseEcdsaKey(env[name]);
-    } catch {
-      problems.push(`${name} is not an ECDSA private key (hex or DER)`);
-    }
-  }
-
-  if (!env.PINATA_JWT) problems.push("PINATA_JWT is missing");
+  const names = ["OPERATOR_ID", TOKEN_CLASSES[tokenClass].envVar, "HCS_TOPIC_ID"];
+  if (tokenClass === "achala") names.push("UMINA_TOKEN_ID", "TREASURY_ID");
+  const problems = envProblems(env, [...names, "OPERATOR_KEY", "SUPPLY_KEY", "PINATA_JWT"]);
 
   const submitProblem = submitKeyProblem(env);
   if (submitProblem) problems.push(submitProblem);

@@ -123,7 +123,7 @@ describe("createToken.js", () => {
     mockDependencies();
     await runScript();
 
-    expect(console.error).toHaveBeenCalledWith("   - SUPPLY_KEY is missing");
+    expect(console.error).toHaveBeenCalledWith("   - SUPPLY_KEY is not set");
     expect(calls.forTestnet).not.toHaveBeenCalled();
     expect(process.exitCode).toBe(1);
   });

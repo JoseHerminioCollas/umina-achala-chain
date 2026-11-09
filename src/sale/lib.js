@@ -6,6 +6,7 @@
 
 import { parseArgs } from "util";
 import { treasuryKeyProblem } from "../keys.js";
+import { envProblems, serialProblem } from "../env.js";
 import { submitKeyProblem } from "../hcs.js";
 import { TOKEN_CLASSES, tokenClassProblem } from "../token/lib.js";
 
@@ -60,10 +61,9 @@ export function saleProblems(env, serial, price, tokenClass = "umina") {
   const needed = [...REQUIRED];
   needed.splice(3, 0, TOKEN_CLASSES[tokenClass].envVar);
   if (tokenClass === "achala") needed.splice(3, 0, "UMINA_TOKEN_ID");
-  const problems = needed.filter((k) => !env[k]).map((k) => `${k} is not set`);
-  if (!/^[1-9]\d*$/.test(serial ?? "")) {
-    problems.push("give the NFT serial number as a positive integer");
-  }
+  const problems = envProblems(env, needed);
+  const bad = serialProblem(serial);
+  if (bad) problems.push(bad);
   if (!/^\d+(\.\d{1,8})?$/.test(price ?? "") || !(Number(price) > 0)) {
     problems.push("give the price in HBAR as a positive number, at most 8 decimals");
   }

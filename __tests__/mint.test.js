@@ -55,9 +55,9 @@ describe("validateMintEnv", () => {
     delete env.SUPPLY_KEY;
     expect(validateMintEnv(env)).toEqual(
       expect.arrayContaining([
-        "UMINA_TOKEN_ID is missing",
-        "PINATA_JWT is missing",
-        "SUPPLY_KEY is missing",
+        "UMINA_TOKEN_ID is not set",
+        "PINATA_JWT is not set",
+        "SUPPLY_KEY is not set",
       ]),
     );
   });
@@ -280,10 +280,10 @@ describe("parseMintArgs", () => {
 
 describe("minting an Achala (umina-achala-chain#16)", () => {
   test("validateMintEnv needs the Achala token, and the Umiña token and treasury to check its stones", () => {
-    expect(validateMintEnv(makeEnv(), "achala")).toEqual(["ACHALA_TOKEN_ID is missing", "TREASURY_ID is missing"]);
+    expect(validateMintEnv(makeEnv(), "achala")).toEqual(["ACHALA_TOKEN_ID is not set", "TREASURY_ID is not set"]);
     expect(
       validateMintEnv(makeEnv({ UMINA_TOKEN_ID: undefined, ACHALA_TOKEN_ID: "0.0.4004", TREASURY_ID: "0.0.1001" }), "achala"),
-    ).toEqual(["UMINA_TOKEN_ID is missing"]);
+    ).toEqual(["UMINA_TOKEN_ID is not set"]);
   });
 
   test("checkStoneId follows the class and names the other one", () => {
