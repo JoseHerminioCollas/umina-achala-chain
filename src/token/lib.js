@@ -78,6 +78,17 @@ export function parseCreateArgs(argv) {
 
 export const ROYALTY = { numerator: 5, denominator: 100 };
 
+/**
+ * The most the operator will pay to create a token, in HBAR. Creating a token
+ * with custom fees costs about USD 2, charged in HBAR at the network's rate of
+ * the hour. The SDK's default cap for a token creation is 30 HBAR, which is
+ * below USD 2 once HBAR is under about 6.7 cents, and the network then refuses
+ * the transaction with INSUFFICIENT_TX_FEE (testnet, 2026-11-10, at 6.54
+ * cents). 50 HBAR covers USD 2 down to 4 cents. It is a ceiling only: the
+ * network charges the actual fee.
+ */
+export const MAX_CREATE_FEE_HBAR = 50;
+
 // An HBAR amount with at most 8 decimals (1 tinybar = 0.00000001 HBAR)
 const HBAR_AMOUNT = /^\d+(\.\d{1,8})?$/;
 const ID_NAMES = ["OPERATOR_ID", "TREASURY_ID"];
@@ -175,7 +186,9 @@ export function buildTokenTransaction(env, keys, tokenClass = "umina") {
     .setSupplyType(TokenSupplyType.Infinite)
     .setInitialSupply(0)
     .setDecimals(0)
-    .setTokenMemo(memo);
+    .setTokenMemo(memo)
+    // Above the SDK's default of 30 HBAR, see MAX_CREATE_FEE_HBAR
+    .setMaxTransactionFee(new Hbar(MAX_CREATE_FEE_HBAR));
 }
 
 /** Plain-text summary of the token parameters, with no keys in it. */
@@ -194,6 +207,7 @@ export function describeToken(env, keys, tokenClass = "umina") {
     memo,
     roles: ["admin", "supply", "feeSchedule", "pause", "wipe"],
     metadataKey: "none (NFT metadata is immutable)",
+    maxTransactionFee: `${MAX_CREATE_FEE_HBAR} HBAR (a ceiling; the network charges about USD 2 in HBAR)`,
     treasurySignsSeparately: Boolean(keys.treasury),
   };
 }

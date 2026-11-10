@@ -3,6 +3,7 @@ import {
   buildTokenTransaction,
   describeToken,
   loadKeys,
+  MAX_CREATE_FEE_HBAR,
   TOKEN_CLASSES,
   validateEnv,
 } from "../src/token/lib.js";
@@ -147,6 +148,14 @@ describe("buildTokenTransaction", () => {
     const [fee] = buildTokenTransaction(custom, loadKeys(custom)).customFees;
     expect(fee.fallbackFee.hbarAmount.toTinybars().toString()).toBe("3712345678");
   });
+
+  test("caps the creation fee at 50 HBAR, above the SDK's default of 30 (INSUFFICIENT_TX_FEE at 6.54 cents)", () => {
+    expect(MAX_CREATE_FEE_HBAR).toBe(50);
+    expect(tx.maxTransactionFee.toTinybars().toString()).toBe("5000000000");
+    expect(buildTokenTransaction(env, keys, "achala").maxTransactionFee.toTinybars().toString()).toBe(
+      "5000000000",
+    );
+  });
 });
 
 describe("describeToken", () => {
@@ -156,6 +165,7 @@ describe("describeToken", () => {
     expect(text).toContain("Umiña");
     expect(text).toContain("5/100");
     expect(text).toContain("38 HBAR");
+    expect(text).toContain("50 HBAR (a ceiling");
     expect(text).not.toContain('"metadata"');
     expect(text).not.toContain(operatorKey);
   });
