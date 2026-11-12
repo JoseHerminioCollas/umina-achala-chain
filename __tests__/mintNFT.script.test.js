@@ -1037,7 +1037,7 @@ describe("mintNFT.js", () => {
     mockDependencies({ topicEvents: stoneEvents });
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "achala-form-"));
     fs.writeFileSync(path.join(dir, "front.jpg"), photo);
-    const post = JSON.parse(fs.readFileSync("json/sample-achala-form-post.json", "utf8"));
+    const post = JSON.parse(fs.readFileSync("json_testnet_posts/achala_a.json", "utf8"));
     Object.assign(post, {
       stones: [{ serial: 3, stone_id: "UMINA-2026-CH-03" }],
       metals: [{ stone_type: "gold", fineness: "18k", weight_g: 2, source: "umina", stone_id: "UMINA-2026-CH-03" }],

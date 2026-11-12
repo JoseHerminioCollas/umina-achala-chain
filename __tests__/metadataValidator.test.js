@@ -94,7 +94,7 @@ describe("Achala metadata (umina-achala-chain#16)", () => {
     expect(validateMetadata(withPlaceholderAssets(raw), "achala").errors[0].message).toContain(
       "add the invoice to documents",
     );
-    raw.documents = [{ file: "../samples/store-receipt.pdf", description: "Gold invoice" }];
+    raw.documents = [{ file: "../samples/chrysocolla_a_store-receipt.pdf", description: "Gold invoice" }];
     expect(withPlaceholderAssets(raw).files).toEqual([
       { uri: "ipfs://pending", type: "application/pdf", metadata: { description: "Gold invoice" } },
     ]);

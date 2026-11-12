@@ -136,7 +136,7 @@ export const done = runScript("Unexpected error during minting workflow", async 
   if (!formFile && !metadataFile) {
     console.error(
       "❌ Give a form post or a metadata file:\n" +
-        "   node src/mint/mintNFT.js --form json/sample-umina-form-post.json [--token umina|achala] [--out dir] [--force] [--dry-run | --images-only]\n" +
+        "   node src/mint/mintNFT.js --form json_testnet_posts/chrysocolla_a.json [--token umina|achala] [--out dir] [--force] [--dry-run | --images-only]\n" +
         "   node src/mint/mintNFT.js <metadata-file> [--token umina|achala] [--out dir] [--force] [--dry-run | --images-only]",
     );
     process.exitCode = 1;

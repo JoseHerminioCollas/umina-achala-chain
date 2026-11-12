@@ -19,22 +19,30 @@
     "Stone Cut": "Cabochon"
   },
   "main_image": {
-    "file": "../samples/master.jpg",
-    "description": "Front view"
+    "file": "../samples/chrysocolla_a1.jpg",
+    "description": "View 1 of 3"
   },
   "images": [
     {
-      "file": "../samples/thumb.jpg",
-      "description": "Back view"
+      "file": "../samples/chrysocolla_a1.png",
+      "description": "View 1 of 3, transparent background"
+    },
+    {
+      "file": "../samples/chrysocolla_a2.png",
+      "description": "View 2 of 3, turned 120°"
+    },
+    {
+      "file": "../samples/chrysocolla_a3.png",
+      "description": "View 3 of 3, turned 240°"
     }
   ],
   "documents": [
     {
-      "file": "../samples/store-receipt.pdf",
+      "file": "../samples/chrysocolla_a_store-receipt.pdf",
       "description": "Store receipt (sample, fake)"
     },
     {
-      "file": "../samples/mining-permit.pdf",
+      "file": "../samples/chrysocolla_a_mining-permit.pdf",
       "description": "Mining concession and extraction permit (sample, fake)"
     }
   ]

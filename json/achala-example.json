@@ -4,8 +4,8 @@
   "description": "Ring set with a certified Umiña chrysocolla, in 18k gold from a certified Umiña nugget (fake data for testing).",
   "format": "HIP412@2.0.0",
   "metadata_version": "1.0.0",
-  "main_image": { "file": "../samples/master.jpg", "description": "Front view" },
-  "images": [{ "file": "../samples/thumb.jpg", "description": "Side view" }],
+  "main_image": { "file": "../samples/chrysocolla_a1.jpg", "description": "View 1 of 3" },
+  "images": [{ "file": "../samples/chrysocolla_a2.png", "description": "View 2 of 3, turned 120°" }],
   "properties": {
     "stone_id": "ACHALA-2026-RI-01",
     "piece_type": "ring",

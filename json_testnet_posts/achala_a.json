@@ -14,6 +14,6 @@
   "vendor_name": "Joyería Ejemplo S.A.C.",
   "vendor_ruc": "20999887768",
   "attributes": { "Chain Length": "45 cm" },
-  "main_image": { "file": "../samples/master.jpg", "description": "Front view" },
-  "documents": [{ "file": "../samples/store-receipt.pdf", "description": "Silver invoice (sample, fake)" }]
+  "main_image": { "file": "../samples/chrysocolla_a1.jpg", "description": "View 1 of 3" },
+  "documents": [{ "file": "../samples/chrysocolla_a_store-receipt.pdf", "description": "Silver invoice (sample, fake)" }]
 }
