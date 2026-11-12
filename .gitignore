@@ -9,7 +9,7 @@ node_modules/
 .vscode/
 
 # Local images and documents for test mints (pinned to IPFS, not committed)
-samples/
+samples
 
 # Metadata files generated from a mint form post
 generated/
