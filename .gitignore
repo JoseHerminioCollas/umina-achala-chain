@@ -8,8 +8,8 @@ node_modules/
 .DS_Store
 .vscode/
 
-# Local images and documents for test mints (pinned to IPFS, not committed)
-samples
+# Symlink to the umina-achala-testnet repo: test posts, images and documents
+/testnet
 
 # Metadata files generated from a mint form post
 generated/

@@ -227,14 +227,14 @@ export function missingAssets(images) {
 }
 
 /**
- * Returns a problem message when some image lives under the samples folder
- * but the folder itself does not exist (it is git-ignored, so a fresh clone
- * does not have it).
+ * Returns a problem message when some file lives under the testnet folder
+ * but the folder itself does not exist (it is a git-ignored symlink to the
+ * umina-achala-testnet repo, so a fresh clone does not have it).
  */
-export function samplesFolderProblem(images, samplesDir) {
-  const inSamples = images.some((a) => a.file.startsWith(samplesDir + path.sep));
-  return inSamples && !fs.existsSync(samplesDir)
-    ? `${samplesDir} is missing. It is git-ignored; add your test images to it`
+export function testnetFolderProblem(images, testnetDir) {
+  const inTestnet = images.some((a) => a.file.startsWith(testnetDir + path.sep));
+  return inTestnet && !fs.existsSync(testnetDir)
+    ? `${testnetDir} is missing. It is git-ignored; link it to the umina-achala-testnet repo: ln -s ../umina-achala-testnet testnet`
     : null;
 }
 

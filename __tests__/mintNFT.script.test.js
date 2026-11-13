@@ -166,7 +166,7 @@ let photo;
 // The first image name becomes main_image and the rest go in images.
 function writeMetadata(change = () => {}, imageNames = ["front.jpg", "back.jpg"], documentNames = []) {
   const metadata = JSON.parse(fs.readFileSync("json/umina-example.json", "utf8"));
-  // The example names its own photos in samples/; each test names its own
+  // The example names its own photos in testnet/; each test names its own
   delete metadata.main_image;
   delete metadata.images;
   const entry = (name) => ({ file: name, description: `${name} description` });
@@ -1037,13 +1037,25 @@ describe("mintNFT.js", () => {
     mockDependencies({ topicEvents: stoneEvents });
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "achala-form-"));
     fs.writeFileSync(path.join(dir, "front.jpg"), photo);
-    const post = JSON.parse(fs.readFileSync("json_testnet_posts/achala_a.json", "utf8"));
-    Object.assign(post, {
+    // A form post of its own: the sample posts live in the git-ignored testnet/ link
+    const post = {
+      name: "Achala Pendant #99 - Chrysocolla in Gold",
+      description: "Test pendant submitted through the mint form.",
+      stone_id: "ACHALA-2026-PE-99",
+      piece_type: "pendant",
       stones: [{ serial: 3, stone_id: "UMINA-2026-CH-03" }],
       metals: [{ stone_type: "gold", fineness: "18k", weight_g: 2, source: "umina", stone_id: "UMINA-2026-CH-03" }],
+      technique: "Wire wrapping",
+      artisan_rna: "RNA-112233",
+      hs_code: "7113.11.00.00",
+      jurisdiction: "Peru",
+      legal_uri: "https://umina-achala.pe/",
+      creator: "Joyería Ejemplo S.A.C.",
+      vendor_name: "Joyería Ejemplo S.A.C.",
+      vendor_ruc: "20999887768",
+      attributes: { "Chain Length": "45 cm" },
       main_image: { file: "front.jpg", description: "Front" },
-    });
-    delete post.documents;
+    };
     const file = path.join(dir, "post.json");
     fs.writeFileSync(file, JSON.stringify(post));
     await runScript("--form", file, "--token", "achala", "--out", path.join(dir, "generated"));

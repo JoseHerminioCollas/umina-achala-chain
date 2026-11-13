@@ -81,7 +81,7 @@ import {
   parseMintArgs,
   pinFile,
   pinJson,
-  samplesFolderProblem,
+  testnetFolderProblem,
   validateMintEnv,
 } from "./lib.js";
 import { metadataFromForm, writeGeneratedMetadata } from "./formPost.js";
@@ -136,7 +136,7 @@ export const done = runScript("Unexpected error during minting workflow", async 
   if (!formFile && !metadataFile) {
     console.error(
       "❌ Give a form post or a metadata file:\n" +
-        "   node src/mint/mintNFT.js --form json_testnet_posts/chrysocolla_a.json [--token umina|achala] [--out dir] [--force] [--dry-run | --images-only]\n" +
+        "   node src/mint/mintNFT.js --form testnet/chrysocolla_a.json [--token umina|achala] [--out dir] [--force] [--dry-run | --images-only]\n" +
         "   node src/mint/mintNFT.js <metadata-file> [--token umina|achala] [--out dir] [--force] [--dry-run | --images-only]",
     );
     process.exitCode = 1;
@@ -172,8 +172,8 @@ export const done = runScript("Unexpected error during minting workflow", async 
   const { documents, problems: documentProblems } = collectDocuments(metadata, baseDir);
   problems.push(...documentProblems);
   const uploads = [...images, ...documents];
-  const samplesProblem = samplesFolderProblem(uploads, path.resolve("samples"));
-  if (samplesProblem) problems.push(samplesProblem);
+  const testnetProblem = testnetFolderProblem(uploads, path.resolve("testnet"));
+  if (testnetProblem) problems.push(testnetProblem);
   else missingAssets(uploads).forEach((a) => problems.push(`file not found: ${a.file}`));
   const idProblem = checkStoneId(metadata.properties?.stone_id, tokenClass);
   if (idProblem) problems.push(idProblem);

@@ -12,7 +12,7 @@ import {
   parseMintArgs,
   pinFile,
   pinJson,
-  samplesFolderProblem,
+  testnetFolderProblem,
   validateMintEnv,
   withPlaceholderAssets,
 } from "../src/mint/lib.js";
