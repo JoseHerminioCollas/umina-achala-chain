@@ -1,5 +1,11 @@
 import { PrivateKey } from "@hashgraph/sdk";
-import { consignmentProblems, consignmentSplit, roleProblems } from "../src/consignment/lib.js";
+import {
+  consignmentNfts,
+  consignmentProblems,
+  consignmentSplit,
+  roleProblems,
+  tokenVars,
+} from "../src/consignment/lib.js";
 
 const KEY = PrivateKey.generateECDSA().toStringDer();
 
@@ -85,5 +91,58 @@ describe("consignmentProblems", () => {
     expect(consignmentProblems(env, required, serial)).toEqual([
       "give the NFT serial number as a positive integer",
     ]);
+  });
+});
+
+describe("consignmentNfts (umina-achala-chain#28)", () => {
+  const env = { UMINA_TOKEN_ID: "0.0.2002", ACHALA_TOKEN_ID: "0.0.8008" };
+  const events = [
+    { event: "MINT", stone_id: "UMINA-2026-CH-03", token_id: "0.0.2002", serials: ["3"] },
+    { event: "MINT", stone_id: "UMINA-2026-AU-01", token_id: "0.0.2002", serials: ["4"] },
+    { event: "MINT", stone_id: "UMINA-2026-QZ-02", token_id: "0.0.2002", serials: ["5"] },
+    {
+      event: "MINT",
+      stone_id: "ACHALA-2026-RI-01",
+      token_id: "0.0.8008",
+      serials: ["1"],
+      from_stone_ids: ["UMINA-2026-CH-03", "UMINA-2026-AU-01"],
+    },
+  ].map((event, i) => ({ sequence_number: i + 1, event }));
+
+  test("an Umiña not in an Achala moves alone", () => {
+    const plan = consignmentNfts(events, env, "5");
+    expect(plan.problems).toEqual([]);
+    expect(plan.nftIds.map(String)).toEqual(["0.0.2002/5"]);
+    expect(plan.fields).toEqual({});
+  });
+
+  test("an Umiña in an Achala is refused on its own", () => {
+    expect(consignmentNfts(events, env, "3").problems).toEqual([
+      expect.stringContaining("UMINA-2026-CH-03 (0.0.2002/3) is mounted in Achala ACHALA-2026-RI-01"),
+    ]);
+  });
+
+  test("an Achala moves with its stones and names them for the event", () => {
+    const plan = consignmentNfts(events, env, "1", "achala");
+    expect(plan.problems).toEqual([]);
+    expect(plan.nftIds.map(String)).toEqual(["0.0.8008/1", "0.0.2002/3", "0.0.2002/4"]);
+    expect(plan.stoneId).toBe("ACHALA-2026-RI-01");
+    expect(plan.fields).toEqual({
+      from_stone_ids: ["UMINA-2026-CH-03", "UMINA-2026-AU-01"],
+      umina_token_id: "0.0.2002",
+      umina_serials: ["3", "4"],
+    });
+  });
+
+  test("a burned Achala is refused", () => {
+    const burned = [...events, { sequence_number: 9, event: { event: "BURN", token_id: "0.0.8008", serials: ["1"] } }];
+    expect(consignmentNfts(burned, env, "1", "achala").problems).toEqual([
+      "Achala 0.0.8008/1 is burned (the piece was taken apart)",
+    ]);
+  });
+
+  test("an Achala needs both token IDs", () => {
+    expect(tokenVars("achala")).toEqual(["UMINA_TOKEN_ID", "ACHALA_TOKEN_ID"]);
+    expect(tokenVars()).toEqual(["UMINA_TOKEN_ID"]);
   });
 });

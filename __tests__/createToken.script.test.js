@@ -1,5 +1,6 @@
 import { jest } from "@jest/globals";
 import { PrivateKey } from "@hashgraph/sdk";
+import { actualSdk } from "../testHelpers/actualSdk.js";
 
 // Runs src/token/createToken.js itself (it calls main() on import) with dotenv
 // and the network client mocked, and records how it signs and executes.
@@ -23,7 +24,7 @@ function mockDependencies({ executeError } = {}) {
   }));
 
   jest.doMock("@hashgraph/sdk", () => ({
-    ...jest.requireActual("@hashgraph/sdk"),
+    ...actualSdk(),
     Client: { forTestnet: calls.forTestnet },
   }));
 

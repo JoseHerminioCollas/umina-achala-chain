@@ -4,4 +4,6 @@ export default {
   // suites running in parallel one test can pass the 5-second default.
   testTimeout: 20000,
   transform: { "^.+\\.jsx?$": "babel-jest" },
+  // NETWORK is required by the scripts; the tests run as on testnet
+  setupFiles: ["<rootDir>/testHelpers/setupNetwork.js"],
 };

@@ -17,27 +17,18 @@ import { parseEcdsaKey } from "../keys.js";
 import { envProblems, idProblem, isHederaId } from "../env.js";
 import { parseArgs } from "util";
 import { submitKeyProblem } from "../hcs.js";
+import ua from "../../config/umina-achala.js";
+import umina from "../../config/umina.js";
+import achala from "../../config/achala.js";
 
 /**
- * The token classes UA creates (umina-achala-chain#15): Umiña for stones and
- * Achala for jewelry made of Umiña stones. Both share every other setting
- * (keys, no metadata key, royalty and fallback fee, infinite supply); each
- * has its own name, symbol, memo and env variable for its ID.
+ * The token classes UA creates (umina-achala-chain#15), from config/umina.js
+ * and config/achala.js (#34): Umiña for stones and Achala for jewelry made of
+ * Umiña stones. Both share every other setting (keys, no metadata key,
+ * royalty and fallback fee, infinite supply); each has its own name, symbol,
+ * memo, env variable for its ID, stone_id prefix, schema and template.
  */
-export const TOKEN_CLASSES = {
-  umina: {
-    name: "Umiña",
-    symbol: "UMINA",
-    memo: "Umiña: Peruvian stones",
-    envVar: "UMINA_TOKEN_ID",
-  },
-  achala: {
-    name: "Achala",
-    symbol: "ACHALA",
-    memo: "Achala: Peruvian jewelry made of Umiña stones",
-    envVar: "ACHALA_TOKEN_ID",
-  },
-};
+export const TOKEN_CLASSES = { umina, achala };
 
 /**
  * The problem with a --token value, or undefined when it names a class. Only
@@ -76,18 +67,11 @@ export function parseCreateArgs(argv) {
   return { ...input, problems };
 }
 
-export const ROYALTY = { numerator: 5, denominator: 100 };
+/** The royalty set on both token classes (config/umina-achala.js). */
+export const ROYALTY = ua.royalty;
 
-/**
- * The most the operator will pay to create a token, in HBAR. Creating a token
- * with custom fees costs about USD 2, charged in HBAR at the network's rate of
- * the hour. The SDK's default cap for a token creation is 30 HBAR, which is
- * below USD 2 once HBAR is under about 6.7 cents, and the network then refuses
- * the transaction with INSUFFICIENT_TX_FEE (testnet, 2026-11-10, at 6.54
- * cents). 50 HBAR covers USD 2 down to 4 cents. It is a ceiling only: the
- * network charges the actual fee.
- */
-export const MAX_CREATE_FEE_HBAR = 50;
+/** The most the operator will pay to create a token, in HBAR (config/umina-achala.js explains why). */
+export const MAX_CREATE_FEE_HBAR = ua.maxCreateFeeHbar;
 
 // An HBAR amount with at most 8 decimals (1 tinybar = 0.00000001 HBAR)
 const HBAR_AMOUNT = /^\d+(\.\d{1,8})?$/;
@@ -179,7 +163,7 @@ export function buildTokenTransaction(env, keys, tokenClass = "umina") {
     .setFeeScheduleKey(keys.feeSchedule.publicKey)
     .setPauseKey(keys.pause.publicKey)
     .setWipeKey(keys.wipe.publicKey)
-    // Royalty policy: 5% of resale payments. The fallback fee is charged to
+    // Royalty policy: ROYALTY of resale payments. The fallback fee is charged to
     // the receiver when no HBAR or fungible token moves with the NFT.
     .setCustomFees([buildRoyaltyFee(treasuryId, env.FALLBACK_FEE_HBAR)])
     // Supply and divisibility

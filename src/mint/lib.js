@@ -13,16 +13,19 @@ import { submitKeyProblem } from "../hcs.js";
 import { MAX_OTHER_IMAGES } from "./images.js";
 import { TOKEN_CLASSES, tokenClassProblem } from "../token/lib.js";
 
-// UMINA-YYYY-XX-NN, for example UMINA-2026-CH-03 (CH = chrysocolla)
-export const STONE_ID = /^UMINA-\d{4}-[A-Z]{2}-\d{2,}$/;
-// ACHALA-YYYY-XX-NN, for example ACHALA-2026-RI-01 (RI = ring)
-const ACHALA_ID = /^ACHALA-\d{4}-[A-Z]{2}-\d{2,}$/;
+/** The stone_id pattern of a class: <idPrefix>-YYYY-XX-NN, e.g. UMINA-2026-CH-03. */
+export function stoneIdPattern(idPrefix) {
+  return new RegExp(`^${idPrefix}-\\d{4}-[A-Z]{2}-\\d{2,}$`);
+}
 
-/** What differs between minting an Umiña and an Achala. */
-export const MINT_CLASSES = {
-  umina: { template: "json/umina-template.json", idPattern: STONE_ID, idExample: "UMINA-2026-CH-03" },
-  achala: { template: "json/achala-template.json", idPattern: ACHALA_ID, idExample: "ACHALA-2026-RI-01" },
-};
+/** What differs between minting an Umiña and an Achala (config/umina.js, config/achala.js). */
+export const MINT_CLASSES = Object.fromEntries(
+  Object.entries(TOKEN_CLASSES).map(([key, { template, idPrefix, idExample }]) => [
+    key,
+    { template, idPattern: stoneIdPattern(idPrefix), idExample },
+  ]),
+);
+
 
 const MINT_OPTIONS = {
   form: { type: "string" },
@@ -169,7 +172,7 @@ export function collectDocuments(metadata, baseDir) {
 /**
  * Reads the input-only photo fields from the metadata (umina-achala-chain#7):
  * `main_image` (required; its display version becomes `image` and its master
- * is the default file) and `images` (optional, at most 5 more). Each has a
+ * is the default file) and `images` (optional, at most MAX_OTHER_IMAGES more). Each has a
  * `file` (relative to the metadata file) and an optional `description`.
  * Returns the photos in order, the main one first with index 1, with
  * absolute paths, plus any problems.

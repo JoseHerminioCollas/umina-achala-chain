@@ -1,7 +1,7 @@
 /**
  * @file adminToken.js
- * @description Uses the Umiña token's admin keys on Hedera (NETWORK, testnet by
- * default) (umina-achala-chain#21). Each command is signed by its own key:
+ * @description Uses the Umiña token's admin keys on Hedera (NETWORK,
+ * required) (umina-achala-chain#21). Each command is signed by its own key:
  *
  *   fees --fallback-hbar <hbar> [--royalty <percent>]   FEE_SCHEDULE_KEY
  *     Replaces the custom fees: the royalty (default 5%) to the treasury,
@@ -14,8 +14,9 @@
  *   burn <serial> --reason <text>                       SUPPLY_KEY
  *     Burns a serial that is still in the treasury.
  *
- * Run from the command line:
- * node src/token/adminToken.js <command> [serial] [options] [--token umina|achala] [--dry-run]
+ * Run from the command line, with NETWORK set (testnet or mainnet; it has no
+ * default and the script refuses to run without it, see src/network.js):
+ * NETWORK=testnet node src/token/adminToken.js <command> [serial] [options] [--token umina|achala] [--dry-run]
  *
  * --token chooses the token class (default umina, UMINA_TOKEN_ID). Use
  * --token achala (ACHALA_TOKEN_ID) for the jewelry class, e.g. to burn the
@@ -100,7 +101,7 @@ let actionTxId;
 
 const USAGE = `Use the token's admin keys.
 
-Usage: node src/token/adminToken.js <command> [serial] [options] [--token umina|achala] [--dry-run]
+Usage: NETWORK=testnet node src/token/adminToken.js <command> [serial] [options] [--token umina|achala] [--dry-run]
 
   fees --fallback-hbar <hbar> [--royalty <percent>]   replace the custom fees
   pause | unpause                                     stop or allow every transfer

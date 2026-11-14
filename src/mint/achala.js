@@ -18,6 +18,7 @@
  */
 
 import { STONE_TYPES, stoneTypeProblem } from "./stoneTypes.js";
+import { nftInfo } from "../mirror.js";
 
 /** Attribute names the mint script writes for an Achala. */
 const ACHALA_TRAITS = ["Piece Type", "Metal", "Stones", "Artisan"];
@@ -308,3 +309,65 @@ export function achalaSaleFields(stones, uminaTokenId) {
     umina_serials: stones.map((s) => String(s.serial)),
   };
 }
+
+/**
+ * What minting an Achala does at each step that differs by token class
+ * (umina-achala-chain#34); umina.js describes the steps. The stones are named
+ * by stone_id and serial, all in the Umiña token (UMINA_TOKEN_ID).
+ */
+export const mintSteps = {
+  /** properties.umina_token_id from UMINA_TOKEN_ID when it is absent. */
+  fill: (metadata, env) => (env.UMINA_TOKEN_ID ? withUminaTokenId(metadata, env.UMINA_TOKEN_ID) : metadata),
+
+  /**
+   * properties.umina_token_id must be the Umiña token. A missing
+   * UMINA_TOKEN_ID is reported here only for --images-only, which skips the
+   * environment check that otherwise reports it.
+   */
+  inputProblems: (metadata, env, { imagesOnly } = {}) => {
+    if (!env.UMINA_TOKEN_ID) {
+      return imagesOnly ? ["UMINA_TOKEN_ID is missing; it fills properties.umina_token_id"] : [];
+    }
+    const problem = uminaTokenProblem(metadata.properties ?? {}, env.UMINA_TOKEN_ID);
+    return problem ? [problem] : [];
+  },
+
+  /**
+   * Each stone, on the mirror node and in the topic's events: in the Umiña
+   * token, matching its MINT event, not burned, held by the treasury and not
+   * mounted in another Achala. The context has the stones and their types.
+   */
+  checkLedger: async (metadata, events, env, tokenId) => {
+    const { stones } = metadata.properties;
+    let nfts;
+    try {
+      nfts = await Promise.all(stones.map((s) => nftInfo(env.UMINA_TOKEN_ID, s.serial)));
+    } catch (err) {
+      return { error: `Cannot check the stones on the mirror node: ${err.message}` };
+    }
+    const problems = stoneLedgerProblems(stones, nfts, events, {
+      uminaTokenId: env.UMINA_TOKEN_ID,
+      achalaTokenId: tokenId,
+      treasuryId: env.TREASURY_ID,
+    });
+    if (problems.length) return { problems };
+    return {
+      problems: [],
+      context: { stoneTypeById: stoneTypesFromEvents(events, stones) },
+      message: `Stones checked: ${stones.map((s) => s.stone_id).join(", ")}`,
+    };
+  },
+
+  /** Piece Type, Metal, Stones and Artisan; Stones by type name once checked. */
+  withAttributes: (metadata, context = {}) => withAchalaAttributes(metadata, context.stoneTypeById),
+
+  complianceFields: (properties) => achalaComplianceFields(properties),
+
+  /** The stones, which the MINT event records as mounted. */
+  mintFields: (metadata) => ({ from_stone_ids: metadata.properties.stones.map((s) => s.stone_id) }),
+
+  mintFailureNote: (metadata) =>
+    `Without its MINT event the Achala's stones are not recorded as mounted: ${metadata.properties.stones
+      .map((s) => s.stone_id)
+      .join(", ")}.`,
+};

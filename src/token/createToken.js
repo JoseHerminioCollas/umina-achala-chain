@@ -6,10 +6,11 @@
  * (jewelry made of Umiña stones, umina-achala-chain#15). Both classes share
  * every setting except name, symbol and memo.
  *
- * Run from the command line:
- * node src/token/createToken.js [env-file] [--token umina|achala] [--dry-run]
+ * Run from the command line, with NETWORK set (testnet or mainnet; it has no
+ * default and the script refuses to run without it, see src/network.js):
+ * NETWORK=testnet node src/token/createToken.js [env-file] [--token umina|achala] [--dry-run]
  *
- * The network is NETWORK (testnet when unset, see src/network.js) and the env
+ * The network is NETWORK (required, see src/network.js) and the env
  * file defaults to its own (.env.testnet); a file given must name the network.
  * --dry-run checks the environment and prints the token parameters without
  * keys and without touching the network.
@@ -36,7 +37,7 @@ if (!input.problems.length && !fileProblem) loadEnv(envFile);
 
 const USAGE = `Create an NFT token class with its royalty and role keys.
 
-Usage: node src/token/createToken.js [env-file] [--token umina|achala] [--dry-run]
+Usage: NETWORK=testnet node src/token/createToken.js [env-file] [--token umina|achala] [--dry-run]
 
   [env-file]             default: the network's own; its name must name the network
   --token umina|achala   the class to create (default umina)`;

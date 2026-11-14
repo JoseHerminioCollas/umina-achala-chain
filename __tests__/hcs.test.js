@@ -8,6 +8,7 @@ import {
   submitKeyProblem,
   utcSeconds,
 } from "../src/hcs.js";
+import { actualSdk } from "../testHelpers/actualSdk.js";
 
 const envelope = {
   event: "MINT",
@@ -95,7 +96,7 @@ describe("submitEvent", () => {
     calls = { order: [], signed: [] };
     jest.resetModules();
     jest.doMock("@hashgraph/sdk", () => ({
-      ...jest.requireActual("@hashgraph/sdk"),
+      ...actualSdk(),
       TopicMessageSubmitTransaction: jest.fn().mockImplementation(() => {
         const tx = {
           setTopicId: jest.fn((id) => ((calls.topicId = id), tx)),

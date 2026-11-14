@@ -6,14 +6,15 @@
  * HBAR. Sales made by sellConsigned.js and sellOwnItem.js already record their
  * own SALE; this is for the rest.
  *
- * Run from the command line:
+ * Run from the command line, with NETWORK set (testnet or mainnet; it has no
+ * default and the script refuses to run without it, see src/network.js):
  *
- * node src/record/recordEvent.js sale <serial> --seller <id> --buyer <id>
+ * NETWORK=testnet node src/record/recordEvent.js sale <serial> --seller <id> --buyer <id>
  *   --nft-tx <tx-id> --payment <on_chain|off_chain> [--payment-tx <tx-id>]
  *   [--sold-for <amount> [--currency <code>]] [--stone-id <id>]
  *   [--token umina|achala] [--dry-run]
  *
- * node src/record/recordEvent.js delivered <serial> --buyer <id>
+ * NETWORK=testnet node src/record/recordEvent.js delivered <serial> --buyer <id>
  *   [--method in_person] [--delivered-at <date-time>] [--proof <file>]
  *   [--stone-id <id>] [--token umina|achala] [--dry-run]
  *
@@ -45,10 +46,8 @@
 
 import fs from "fs";
 import {
-  checkProof,
   consensusDate,
   deliveredFields,
-  deliveryProofMessage,
   findDelivery,
   findSaleByRef,
   latestSaleTo,
@@ -57,6 +56,7 @@ import {
   saleFields,
   saleLedgerProblems,
 } from "./lib.js";
+import { checkProof, deliveryProofMessage } from "./proof.js";
 import { accountKey, nftInfo, transactionRecord } from "../mirror.js";
 import { readProvenance } from "../provenance.js";
 import { buildEvent, loadSubmitKey, submitEvent } from "../hcs.js";
@@ -183,11 +183,11 @@ const USAGE = `Record a SALE or DELIVERED event for something that already happe
 checking it against the ledger. It never moves an NFT or HBAR.
 
 Usage:
-  node src/record/recordEvent.js sale <serial> --seller <id> --buyer <id>
+  NETWORK=testnet node src/record/recordEvent.js sale <serial> --seller <id> --buyer <id>
     --nft-tx <tx-id> --payment <on_chain|off_chain> [--payment-tx <tx-id>]
     [--sold-for <amount> [--currency <code>]] [--stone-id <id>]
     [--token umina|achala] [--dry-run]
-  node src/record/recordEvent.js delivered <serial> --buyer <id>
+  NETWORK=testnet node src/record/recordEvent.js delivered <serial> --buyer <id>
     [--method in_person] [--delivered-at <date-time>] [--proof <file>]
     [--stone-id <id>] [--token umina|achala] [--dry-run]`;
 

@@ -165,10 +165,13 @@ describe("images", () => {
     ]);
   });
 
-  test("collectImages allows at most 5 photos besides main_image", () => {
-    const images = Array.from({ length: 6 }, (_, i) => ({ file: `${i}.jpg` }));
-    expect(collectImages({ main_image: { file: "m.jpg" }, images }, dir).problems).toEqual([
-      "images lists 6 photos; at most 5 besides main_image",
+  test("collectImages allows at most 20 photos besides main_image (#35)", () => {
+    const list = (n) => Array.from({ length: n }, (_, i) => ({ file: `${i}.jpg` }));
+    const twenty = collectImages({ main_image: { file: "m.jpg" }, images: list(20) }, dir);
+    expect(twenty.problems).toEqual([]);
+    expect(twenty.images).toHaveLength(21);
+    expect(collectImages({ main_image: { file: "m.jpg" }, images: list(21) }, dir).problems).toEqual([
+      "images lists 21 photos; at most 20 besides main_image",
     ]);
   });
 

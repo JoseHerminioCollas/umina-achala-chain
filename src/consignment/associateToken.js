@@ -1,15 +1,16 @@
 /**
  * @file associateToken.js
  * @description Associates a token (Umiña by default, Achala with --token
- * achala) with a merchant or buyer test account on Hedera (NETWORK, testnet by
- * default). An account must associate a token before it can receive one of its
+ * achala) with a merchant or buyer test account on Hedera (NETWORK,
+ * required). An account must associate a token before it can receive one of its
  * NFTs: the buyer before sellConsigned.js or sellOwnItem.js, the merchant
  * before consignToMerchant.js (which also does it for the merchant). The buyer
  * of an Achala receives its Umiña stones too, so associates both tokens
  * (umina-achala-chain#26).
  *
- * Run from the command line:
- * node src/consignment/associateToken.js <merchant|buyer> [--token umina|achala] [--dry-run]
+ * Run from the command line, with NETWORK set (testnet or mainnet; it has no
+ * default and the script refuses to run without it, see src/network.js):
+ * NETWORK=testnet node src/consignment/associateToken.js <merchant|buyer> [--token umina|achala] [--dry-run]
  *
  * Uses <ROLE>_ID and <ROLE>_KEY from the env file; the account's key signs and
  * UA (the operator) pays the fee. Testnet only: in production the account
@@ -41,7 +42,7 @@ loadEnv();
 
 const USAGE = `Associate a token with the merchant or buyer test account, so it can receive NFTs.
 
-Usage: node src/consignment/associateToken.js <merchant|buyer> [--token umina|achala] [--dry-run]
+Usage: NETWORK=testnet node src/consignment/associateToken.js <merchant|buyer> [--token umina|achala] [--dry-run]
 
   <merchant|buyer>       the account: MERCHANT_ID/KEY or BUYER_ID/KEY
   --token umina|achala   the token to associate (default umina)`;

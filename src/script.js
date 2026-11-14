@@ -31,7 +31,7 @@ const COMMON_HELP = `
 Common:
   --dry-run       check everything and send nothing (where the script takes it)
   -h, --help      show this help
-  NETWORK=<name>  the network, set in the shell: testnet (default) or mainnet
+  NETWORK=<name>  the network, required, set in the shell: testnet or mainnet
                   (not enabled yet). The env file is the network's own,
                   .env.testnet for testnet.`;
 

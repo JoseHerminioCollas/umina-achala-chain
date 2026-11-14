@@ -3,30 +3,35 @@
  * @description Checks uploaded photos and makes the versions that get pinned
  * (umina-achala-chain#7), with sharp:
  * - master, for every photo: original size, the upload's own format (JPEG
- *   and WebP at quality 95, PNG lossless), a files[] entry with a SHA-256
+ *   and WebP at masterQuality, PNG lossless), a files[] entry with a SHA-256
  *   checksum; the main image's master is the NFT's default file
- * - display, for the main image only: 1080 px on the long side, JPEG
- *   quality 82; becomes `image`, which wallets and marketplaces show
+ * - display, for the main image only: displaySize px on the long side, JPEG
+ *   at displayQuality; becomes `image`, which wallets and marketplaces show
  * No thumbnails: the web site and the mobile app resize what they need
  * (decided 2026-11-05). Every version is auto-rotated from the EXIF
  * orientation and written without any metadata, so no EXIF, XMP or GPS
- * location reaches IPFS. Smaller photos are never enlarged.
+ * location reaches IPFS. Smaller photos are never enlarged. The limits and
+ * qualities are in config/umina-achala.js (images).
  */
 
 import crypto from "crypto";
 import fs from "fs";
 import path from "path";
 import sharp from "sharp";
+import ua from "../../config/umina-achala.js";
 
-export const MAX_FILE_BYTES = 25 * 1024 * 1024;
-export const MAX_PIXELS = 100_000_000;
-export const MAX_OTHER_IMAGES = 5;
-export const DISPLAY_SIZE = 1080;
+export const {
+  maxFileBytes: MAX_FILE_BYTES,
+  maxPixels: MAX_PIXELS,
+  maxOtherImages: MAX_OTHER_IMAGES,
+  displaySize: DISPLAY_SIZE,
+} = ua.images;
+const { masterQuality, displayQuality } = ua.images;
 
 const MASTER = {
-  jpeg: { ext: "jpg", mime: "image/jpeg", encode: (s) => s.jpeg({ quality: 95 }) },
+  jpeg: { ext: "jpg", mime: "image/jpeg", encode: (s) => s.jpeg({ quality: masterQuality }) },
   png: { ext: "png", mime: "image/png", encode: (s) => s.png() },
-  webp: { ext: "webp", mime: "image/webp", encode: (s) => s.webp({ quality: 95 }) },
+  webp: { ext: "webp", mime: "image/webp", encode: (s) => s.webp({ quality: masterQuality }) },
 };
 
 /** The size of a photo fitted inside `max` px on its long side, never enlarged. */
@@ -45,7 +50,9 @@ export function fitInside(width, height, max) {
 export async function inspectImage(file, label) {
   const { size } = fs.statSync(file);
   if (size > MAX_FILE_BYTES) {
-    return { problem: `${label} is ${(size / 1024 / 1024).toFixed(1)} MB; the limit is 25 MB` };
+    return {
+      problem: `${label} is ${(size / 1024 / 1024).toFixed(1)} MB; the limit is ${MAX_FILE_BYTES / 1024 / 1024} MB`,
+    };
   }
   let meta;
   try {
@@ -113,7 +120,7 @@ export async function writeVersions(sourceFile, info, versions) {
   if (versions.display) {
     await base()
       .resize(DISPLAY_SIZE, DISPLAY_SIZE, { fit: "inside", withoutEnlargement: true })
-      .jpeg({ quality: 82 })
+      .jpeg({ quality: displayQuality })
       .toFile(versions.display.file);
   }
   const checksum = crypto

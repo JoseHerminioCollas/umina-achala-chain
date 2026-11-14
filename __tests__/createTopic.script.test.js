@@ -1,5 +1,6 @@
 import { jest } from "@jest/globals";
 import { PrivateKey } from "@hashgraph/sdk";
+import { actualSdk } from "../testHelpers/actualSdk.js";
 
 // Runs src/topic/createTopic.js itself (it calls main() on import) with
 // dotenv, the Hedera client, the transaction and the mirror node mocked.
@@ -22,7 +23,7 @@ function mockDependencies({ executeError, mirrorStatus = 404, mirrorBody = {} } 
 
   jest.doMock("dotenv", () => ({ __esModule: true, default: { config: calls.dotenv } }));
   jest.doMock("@hashgraph/sdk", () => ({
-    ...jest.requireActual("@hashgraph/sdk"),
+    ...actualSdk(),
     Client: { forTestnet: calls.forTestnet },
   }));
   jest.doMock("../src/topic/lib.js", () => {

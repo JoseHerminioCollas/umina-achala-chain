@@ -1,6 +1,7 @@
 import { jest } from "@jest/globals";
 import { mockMirror, restoreMirror } from "../testHelpers/mockMirror.js";
 import { PrivateKey, Status } from "@hashgraph/sdk";
+import { actualSdk } from "../testHelpers/actualSdk.js";
 
 // Runs src/consignment/consignToMerchant.js itself (it calls main() on import)
 // with Hedera and dotenv mocked, and records what it sends.
@@ -21,7 +22,8 @@ const TX_IDS = {
 
 function mockTransaction(name, { executeError, receiptError } = {}) {
   return jest.fn().mockImplementation(() => {
-    const record = { name, set: {}, signed: [] };
+    // set: the last arguments of each setter; each: every call, in order
+    const record = { name, set: {}, each: {}, signed: [] };
     const tx = new Proxy(
       {},
       {
@@ -42,7 +44,11 @@ function mockTransaction(name, { executeError, receiptError } = {}) {
                 },
               };
             };
-          return (...a) => ((record.set[prop] = a.map(String)), tx);
+          return (...a) => {
+            record.set[prop] = a.map(String);
+            (record.each[prop] ??= []).push(a.map(String));
+            return tx;
+          };
         },
       },
     );
@@ -50,14 +56,23 @@ function mockTransaction(name, { executeError, receiptError } = {}) {
   });
 }
 
-function mockDependencies({ alreadyAssociated = false, transferError, approveError, hcsReceiptError, topicEvents = [] } = {}) {
-  calls.mirror = mockMirror(topicEvents);
+function mockDependencies({
+  alreadyAssociated = false,
+  transferError,
+  approveError,
+  hcsReceiptError,
+  topicEvents = [],
+  // Who holds every NFT on the mirror node: the treasury unless a test says
+  holder = process.env.TREASURY_ID,
+  nfts = {},
+} = {}) {
+  calls.mirror = mockMirror(topicEvents, { holder, nfts });
   calls.steps = [];
   calls.close = jest.fn();
   calls.forTestnet = jest.fn(() => ({ setOperator: jest.fn().mockReturnThis(), close: calls.close }));
   jest.doMock("dotenv", () => ({ __esModule: true, default: { config: jest.fn() } }));
   jest.doMock("@hashgraph/sdk", () => {
-    const actual = jest.requireActual("@hashgraph/sdk");
+    const actual = actualSdk();
     return {
       ...actual,
       Client: { forTestnet: calls.forTestnet },
@@ -74,8 +89,8 @@ function mockDependencies({ alreadyAssociated = false, transferError, approveErr
 
 async function runScript(...args) {
   process.argv = ["node", "src/consignment/consignToMerchant.js", ...args];
-  await import("../src/consignment/consignToMerchant.js");
-  await new Promise((resolve) => setImmediate(resolve));
+  const { done } = await import("../src/consignment/consignToMerchant.js");
+  await done;
 }
 
 function alreadyAssociatedError(sdk) {
@@ -165,7 +180,7 @@ describe("consignToMerchant.js", () => {
 
     expect(calls.steps.map((s) => s.name)).toEqual(["associate", "transfer", "approve"]);
     expect(console.error).toHaveBeenCalledWith(
-      `   The NFT already moved to the merchant in ${TX_IDS.transfer}, but ISSUED_TO_OWNER was not recorded.`,
+      `   0.0.2002/7 already moved to the merchant in ${TX_IDS.transfer}, but ISSUED_TO_OWNER was not recorded.`,
     );
     expect(process.exitCode).toBe(1);
   });
@@ -175,7 +190,7 @@ describe("consignToMerchant.js", () => {
     await runScript("7");
 
     expect(console.error).toHaveBeenCalledWith(
-      `   The NFT already moved to the merchant in ${TX_IDS.transfer}, but ISSUED_TO_OWNER was not recorded.`,
+      `   0.0.2002/7 already moved to the merchant in ${TX_IDS.transfer}, but ISSUED_TO_OWNER was not recorded.`,
     );
     expect(process.exitCode).toBe(1);
   });
@@ -275,7 +290,7 @@ describe("consignToMerchant.js", () => {
     await runScript("7", ...extra);
 
     expect(console.error).toHaveBeenCalledWith(
-      "❌ UMINA-2026-CH-07 (0.0.2002/7) is mounted in Achala ACHALA-2026-RI-01 (0.0.8008/1, MINT #2): " +
+      "   - UMINA-2026-CH-07 (0.0.2002/7) is mounted in Achala ACHALA-2026-RI-01 (0.0.8008/1, MINT #2): " +
         "it moves only with its Achala, and is freed when the Achala is burned",
     );
     expect(calls.steps).toEqual([]);
@@ -287,5 +302,92 @@ describe("consignToMerchant.js", () => {
     await runScript("7", "--dry-run");
 
     expect(calls.mirror[0]).toBe("https://testnet.mirrornode.hedera.com/api/v1/topics/0.0.3003");
+  });
+
+  test("refuses a serial the Treasury no longer holds, also on --dry-run", async () => {
+    mockDependencies({ holder: "0.0.7007" });
+    await runScript("7", "--dry-run");
+
+    expect(console.error).toHaveBeenCalledWith(
+      "   - 0.0.2002/7 is held by 0.0.7007, not the Treasury 0.0.1001. Remove the listing.",
+    );
+    expect(calls.steps).toEqual([]);
+    expect(process.exitCode).toBe(1);
+  });
+
+  // --- An Achala with its stones (umina-achala-chain#28) ---
+  const achalaTopic = [
+    { event: "MINT", stone_id: "UMINA-2026-CH-03", token_id: "0.0.2002", serials: ["3"] },
+    { event: "MINT", stone_id: "UMINA-2026-AU-01", token_id: "0.0.2002", serials: ["4"] },
+    {
+      event: "MINT",
+      stone_id: "ACHALA-2026-RI-01",
+      token_id: "0.0.8008",
+      serials: ["1"],
+      from_stone_ids: ["UMINA-2026-CH-03", "UMINA-2026-AU-01"],
+    },
+  ];
+
+  test("--token achala consigns the piece with its stones: both tokens, one transfer, one allowance, one event", async () => {
+    process.env.ACHALA_TOKEN_ID = "0.0.8008";
+    mockDependencies({ topicEvents: achalaTopic });
+    await runScript("1", "--token", "achala");
+
+    expect(calls.steps.map((s) => s.name)).toEqual(["associate", "associate", "transfer", "approve", "hcs"]);
+    const [umina, achala, transfer, approve, hcs] = calls.steps;
+    expect([umina.set.setTokenIds, achala.set.setTokenIds]).toEqual([["0.0.2002"], ["0.0.8008"]]);
+    expect(transfer.each.addNftTransfer).toEqual([
+      ["0.0.8008/1", "0.0.1001", "0.0.4004"],
+      ["0.0.2002/3", "0.0.1001", "0.0.4004"],
+      ["0.0.2002/4", "0.0.1001", "0.0.4004"],
+    ]);
+    expect(approve.each.approveTokenNftAllowance).toEqual([
+      ["0.0.8008/1", "0.0.4004", "0.0.1001"],
+      ["0.0.2002/3", "0.0.4004", "0.0.1001"],
+      ["0.0.2002/4", "0.0.4004", "0.0.1001"],
+    ]);
+    expect(JSON.parse(hcs.set.setMessage[0])).toMatchObject({
+      event: "ISSUED_TO_OWNER",
+      stone_id: "ACHALA-2026-RI-01",
+      token_id: "0.0.8008",
+      serials: ["1"],
+      to_id: "0.0.4004",
+      from_stone_ids: ["UMINA-2026-CH-03", "UMINA-2026-AU-01"],
+      umina_token_id: "0.0.2002",
+      umina_serials: ["3", "4"],
+    });
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  test("--token achala needs ACHALA_TOKEN_ID and refuses an Achala with no MINT", async () => {
+    mockDependencies({ topicEvents: achalaTopic });
+    await runScript("1", "--token", "achala");
+    expect(console.error).toHaveBeenCalledWith("   - ACHALA_TOKEN_ID is not set");
+
+    jest.resetModules();
+    process.env.ACHALA_TOKEN_ID = "0.0.8008";
+    mockDependencies({ topicEvents: achalaTopic });
+    await runScript("2", "--token", "achala");
+    expect(console.error).toHaveBeenCalledWith("   - Achala 0.0.8008/2 has no MINT event on the topic");
+    expect(calls.steps).toEqual([]);
+  });
+
+  test("--token achala refuses when the Treasury no longer holds one of its stones", async () => {
+    process.env.ACHALA_TOKEN_ID = "0.0.8008";
+    mockDependencies({ topicEvents: achalaTopic, nfts: { "0.0.2002/4": { account_id: "0.0.6006", deleted: false } } });
+    await runScript("1", "--token", "achala", "--dry-run");
+
+    expect(console.error).toHaveBeenCalledWith(
+      "   - 0.0.2002/4 is held by 0.0.6006, not the Treasury 0.0.1001. Remove the listing.",
+    );
+    expect(calls.steps).toEqual([]);
+  });
+
+  test("refuses an unknown --token", async () => {
+    mockDependencies();
+    await runScript("1", "--token", "ring");
+
+    expect(console.error).toHaveBeenCalledWith('   - --token must be umina or achala, got "ring"');
+    expect(calls.steps).toEqual([]);
   });
 });

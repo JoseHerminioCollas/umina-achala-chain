@@ -6,10 +6,11 @@
  * topic can be updated or deleted, and the operator as auto-renew account
  * (umina-achala-chain#9).
  *
- * Run from the command line:
- * node src/topic/createTopic.js <provenance|display> [env-file] [--force] [--dry-run]
+ * Run from the command line, with NETWORK set (testnet or mainnet; it has no
+ * default and the script refuses to run without it, see src/network.js):
+ * NETWORK=testnet node src/topic/createTopic.js <provenance|display> [env-file] [--force] [--dry-run]
  *
- * The network is NETWORK (testnet when unset, see src/network.js) and the env
+ * The network is NETWORK (required, see src/network.js) and the env
  * file defaults to its own (.env.testnet); a file given must name the network.
  * The topic kind is required, so a topic is never created without saying which.
  * --dry-run checks the environment and prints the topic parameters without keys
@@ -28,6 +29,7 @@ import {
 import { parseEcdsaKey } from "../keys.js";
 import { envFileProblem, NETWORKS, networkName } from "../network.js";
 import { fail, loadEnv, parseScriptArgs, runScript } from "../script.js";
+import ua from "../../config/umina-achala.js";
 
 const args = parseScriptArgs({ "dry-run": { type: "boolean" }, force: { type: "boolean" } }, 2);
 const dryRun = Boolean(args.values["dry-run"]);
@@ -41,7 +43,7 @@ if (!args.problems.length && !fileProblem) loadEnv(envFile);
 
 const USAGE = `Create an HCS topic with a submit key and an admin key.
 
-Usage: node src/topic/createTopic.js <provenance|display> [env-file] [--force] [--dry-run]
+Usage: NETWORK=testnet node src/topic/createTopic.js <provenance|display> [env-file] [--force] [--dry-run]
 
   <provenance|display>   which topic
   [env-file]             default: the network's own; its name must name the network
@@ -54,7 +56,7 @@ runScript("Topic creation failed", async (session) => {
   // --- 1. Check the topic kind and the environment ---
   const problems = validateTopicEnv(process.env, kind);
   if (problems.length) return fail(problems, `Problems in ${envFile}`);
-  console.log(`🚀 Creating the Umiña Achala ${kind} topic...`);
+  console.log(`🚀 Creating the ${ua.name} ${kind} topic...`);
 
   // --- 2. Build the transaction ---
   const transaction = buildTopicTransaction(process.env, kind);
@@ -82,7 +84,7 @@ runScript("Topic creation failed", async (session) => {
   const response = await frozen.execute(client);
   const receipt = await response.getReceipt(client);
   console.log("-----------------------------------");
-  console.log(`✅ Success! Umiña Achala ${kind} topic ID: ${receipt.topicId}`);
+  console.log(`✅ Success! ${ua.name} ${kind} topic ID: ${receipt.topicId}`);
   console.log("-----------------------------------");
   console.log(`SAVE THIS ID IN ${envFile} AS: ${TOPICS[kind].envVar}`);
 }, { usage: USAGE });

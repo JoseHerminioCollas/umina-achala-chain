@@ -12,18 +12,21 @@
  */
 import Ajv from "ajv";
 import addFormats from "ajv-formats";
-import uminaSchema from "../../schema/hip412-umina-schema.json" with { type: "json" };
-import achalaSchema from "../../schema/hip412-achala-schema.json" with { type: "json" };
 import { stoneTypeProblems } from "./stoneTypes.js";
 import { achalaProblems } from "./achala.js";
+import { TOKEN_CLASSES } from "../token/lib.js";
 
 const ajv = new Ajv({ allErrors: true, allowUnionTypes: true });
 addFormats(ajv);
-const validators = { umina: ajv.compile(uminaSchema), achala: ajv.compile(achalaSchema) };
+const validators = Object.fromEntries(
+  Object.entries(TOKEN_CLASSES).map(([key, { schema }]) => [key, ajv.compile(schema)]),
+);
 
 /** The class of a metadata file from its stone_id: achala for ACHALA-..., else umina. */
 export function classOfMetadata(metadata) {
-  return String(metadata?.properties?.stone_id ?? "").startsWith("ACHALA-") ? "achala" : "umina";
+  const stoneId = String(metadata?.properties?.stone_id ?? "");
+  const found = Object.keys(TOKEN_CLASSES).find((key) => stoneId.startsWith(`${TOKEN_CLASSES[key].idPrefix}-`));
+  return found ?? "umina";
 }
 
 /**

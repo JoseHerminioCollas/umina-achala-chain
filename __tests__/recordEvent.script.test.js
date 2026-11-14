@@ -3,6 +3,7 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 import { PrivateKey } from "@hashgraph/sdk";
+import { actualSdk } from "../testHelpers/actualSdk.js";
 
 // Runs src/record/recordEvent.js itself (it calls main() on import) with
 // dotenv, the Hedera client, HCS and the mirror node mocked.
@@ -35,7 +36,7 @@ function mockDependencies({ events = [], transactions = {}, nft, key, hcsReceipt
   calls.forTestnet = jest.fn(() => ({ setOperator: jest.fn().mockReturnThis(), close: calls.close }));
   jest.doMock("dotenv", () => ({ __esModule: true, default: { config: jest.fn() } }));
   jest.doMock("@hashgraph/sdk", () => ({
-    ...jest.requireActual("@hashgraph/sdk"),
+    ...actualSdk(),
     Client: { forTestnet: calls.forTestnet },
     TopicMessageSubmitTransaction: jest.fn().mockImplementation(() => {
       const tx = {

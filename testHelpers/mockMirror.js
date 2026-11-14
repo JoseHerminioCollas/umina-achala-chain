@@ -11,12 +11,13 @@ const realFetch = global.fetch;
 /**
  * Serves `events` as the messages of any topic (one page, base64 as the
  * mirror node does) and `nfts["<token>/<serial>"]` as NFT info (null: not
- * found). Returns the list of URLs requested.
+ * found). Any other NFT is held by `holder` when it is given, else not found.
+ * Returns the list of URLs requested.
  * @param {object[]} [events] event objects, oldest first
- * @param {{ nfts?: Record<string, object | null>, topicMissing?: boolean }} [options]
+ * @param {{ nfts?: Record<string, object | null>, holder?: string, topicMissing?: boolean }} [options]
  * @returns {string[]}
  */
-export function mockMirror(events = [], { nfts = {}, topicMissing = false } = {}) {
+export function mockMirror(events = [], { nfts = {}, holder, topicMissing = false } = {}) {
   const urls = [];
   const json = (status, body) => ({
     ok: status === 200,
@@ -28,7 +29,8 @@ export function mockMirror(events = [], { nfts = {}, topicMissing = false } = {}
     urls.push(url);
     const nft = /\/api\/v1\/tokens\/([\d.]+)\/nfts\/(\d+)$/.exec(url);
     if (nft) {
-      const info = nfts[`${nft[1]}/${nft[2]}`];
+      const key = `${nft[1]}/${nft[2]}`;
+      const info = key in nfts ? nfts[key] : holder && { account_id: holder, deleted: false };
       return info === null || info === undefined ? json(404, {}) : json(200, info);
     }
     if (/\/api\/v1\/topics\/[\d.]+$/.test(url)) {

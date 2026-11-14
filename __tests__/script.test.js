@@ -1,5 +1,6 @@
 import { jest } from "@jest/globals";
 import { PrivateKey } from "@hashgraph/sdk";
+import { actualSdk } from "../testHelpers/actualSdk.js";
 
 // src/script.js with dotenv and the Hedera client mocked (umina-achala-chain#29)
 const calls = {};
@@ -15,7 +16,7 @@ async function load() {
   calls.forMainnet = jest.fn(() => client);
   jest.doMock("dotenv", () => ({ __esModule: true, default: { config: calls.dotenv } }));
   jest.doMock("@hashgraph/sdk", () => {
-    const actual = jest.requireActual("@hashgraph/sdk");
+    const actual = actualSdk();
     return { ...actual, Client: { forTestnet: calls.forTestnet, forMainnet: calls.forMainnet } };
   });
   return import("../src/script.js");
@@ -34,7 +35,6 @@ describe("script startup (umina-achala-chain#29)", () => {
   });
 
   test("loadEnv reads the network's env file, or the one given", async () => {
-    delete process.env.NETWORK;
     const { loadEnv } = await load();
     expect(loadEnv()).toBe(".env.testnet");
     expect(calls.dotenv).toHaveBeenCalledWith({ path: ".env.testnet" });
@@ -46,6 +46,9 @@ describe("script startup (umina-achala-chain#29)", () => {
     expect(loadEnv(".env.mainnet")).toBeUndefined();
     process.env.NETWORK = "mainnet";
     expect(loadEnv()).toBeUndefined();
+    delete process.env.NETWORK;
+    expect(loadEnv()).toBeUndefined();
+    expect(loadEnv(".env.testnet")).toBeUndefined();
     expect(calls.dotenv).not.toHaveBeenCalled();
   });
 
@@ -61,7 +64,6 @@ describe("script startup (umina-achala-chain#29)", () => {
   });
 
   test("runScript connects to the network as the operator and closes the client", async () => {
-    delete process.env.NETWORK;
     process.env.OPERATOR_ID = "0.0.1001";
     process.env.OPERATOR_KEY = PrivateKey.generateECDSA().toStringDer();
     const { runScript } = await load();
@@ -101,7 +103,21 @@ describe("script startup (umina-achala-chain#29)", () => {
     expect(body).not.toHaveBeenCalled();
     expect(calls.forMainnet).not.toHaveBeenCalled();
     expect(console.error).toHaveBeenCalledWith(
-      "   - NETWORK=mainnet is not enabled yet: its keys and accounts are not decided (umina-achala-chain#6)",
+      "   - NETWORK=mainnet is not enabled yet: its keys and accounts are not decided (umina-achala-chain#32)",
+    );
+    expect(process.exitCode).toBe(1);
+  });
+
+  test("runScript refuses an unset NETWORK, before running anything (#34)", async () => {
+    delete process.env.NETWORK;
+    const { runScript } = await load();
+    const body = jest.fn();
+    await runScript("Test failed", body);
+    expect(body).not.toHaveBeenCalled();
+    expect(calls.forTestnet).not.toHaveBeenCalled();
+    expect(calls.forMainnet).not.toHaveBeenCalled();
+    expect(console.error).toHaveBeenCalledWith(
+      "   - NETWORK is not set: put NETWORK=testnet or NETWORK=mainnet in front of the command",
     );
     expect(process.exitCode).toBe(1);
   });

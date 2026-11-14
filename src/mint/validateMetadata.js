@@ -7,6 +7,7 @@
 import fs from "fs";
 import { withPlaceholderAssets } from "./lib.js";
 import { classOfMetadata, validateMetadata } from "./metadataValidator.js";
+import { TOKEN_CLASSES } from "../token/lib.js";
 
 const filePath = process.argv[2];
 if (!filePath) {
@@ -16,10 +17,11 @@ if (!filePath) {
 
 const metadata = JSON.parse(fs.readFileSync(filePath, "utf8"));
 // image and files are filled in at mint time, so check with placeholders
-const { valid, errors } = validateMetadata(withPlaceholderAssets(metadata), classOfMetadata(metadata));
+const tokenClass = classOfMetadata(metadata);
+const { valid, errors } = validateMetadata(withPlaceholderAssets(metadata), tokenClass);
 
 if (valid) {
-  console.log(`✅ ${classOfMetadata(metadata) === "achala" ? "Achala" : "Umiña"} metadata JSON is valid.`);
+  console.log(`✅ ${TOKEN_CLASSES[tokenClass].name} metadata JSON is valid.`);
 } else {
   console.error("❌ Validation failed:", errors);
   process.exit(1);

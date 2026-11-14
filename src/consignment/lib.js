@@ -1,7 +1,8 @@
 /**
  * @file consignment/lib.js
- * @description Helpers for the Umiña consignment scripts (associateToken.js,
- * consignToMerchant.js, sellConsigned.js). See
+ * @description Helpers for the consignment scripts (associateToken.js,
+ * consignToMerchant.js, sellConsigned.js, endConsignment.js), for an Umiña or
+ * an Achala with its stones (umina-achala-chain#28). See
  * umina-achala-documents/consignment.md.
  */
 
@@ -10,17 +11,21 @@ import {
   Status,
   TokenAssociateTransaction,
 } from "@hashgraph/sdk";
+import { NftId, TokenId } from "@hashgraph/sdk";
 import { ROYALTY, TOKEN_CLASSES } from "../token/lib.js";
 import { envProblems, serialProblem } from "../env.js";
+import { achalaSaleFields, achalaSalePlan, mountedProblem } from "../mint/achala.js";
+import { mountIds } from "../provenance.js";
+import ua from "../../config/umina-achala.js";
 
 /** Test accounts that can associate the token, by role (env var prefix). */
 export const ROLES = { merchant: "MERCHANT", buyer: "BUYER" };
 
 /**
  * UA's commission on a sale through UA's site, in basis points (30.00%). It
- * includes the token's royalty (umina-achala-web#90, decided 2026-11-09).
+ * includes the token's royalty (config/umina-achala.js, umina-achala-web#90).
  */
-export const UA_SHARE_BPS = 3000n;
+export const UA_SHARE_BPS = ua.commissionBps;
 
 /**
  * Splits a price in tinybars into the two payment legs of a consigned sale, so
@@ -120,4 +125,47 @@ export async function associateToken(client, accountId, accountKey, tokenId) {
     }
     throw err;
   }
+}
+
+/**
+ * The token ID variables a consignment script needs for a class: an Achala
+ * also needs UMINA_TOKEN_ID, since its stones move with it (#28).
+ */
+export function tokenVars(tokenClass = "umina") {
+  return tokenClass === "achala" ? ["UMINA_TOKEN_ID", "ACHALA_TOKEN_ID"] : ["UMINA_TOKEN_ID"];
+}
+
+/**
+ * What a consignment script moves for one serial, from the provenance topic
+ * (umina-achala-chain#28):
+ * - an Umiña: that serial, refused while it is mounted in an Achala that
+ *   still exists; it moves only with its Achala (#24)
+ * - an Achala: the Achala and every Umiña stone in it (from its MINT), in
+ *   one transfer, as in the Achala sale (#26)
+ * Returns the problems (empty when the script can go on), the NFTs, and what
+ * the event adds for an Achala: its stone_id, and its stones with their
+ * Umiña serials.
+ * @param {object[]} events the provenance topic's events
+ * @param {Record<string, string | undefined>} env
+ * @param {string} serial
+ * @param {"umina" | "achala"} [tokenClass]
+ * @returns {{ problems: string[], nftIds?: NftId[], stoneId?: string, fields?: object, stones?: object[] }}
+ */
+export function consignmentNfts(events, env, serial, tokenClass = "umina") {
+  const ids = mountIds(env, serial);
+  const nft = (tokenVar, s) => new NftId(TokenId.fromString(env[tokenVar]), Number(s));
+  if (tokenClass === "achala") {
+    const plan = achalaSalePlan(events, ids);
+    if (plan.problems.length) return { problems: plan.problems };
+    return {
+      problems: [],
+      nftIds: [nft("ACHALA_TOKEN_ID", serial), ...plan.stones.map((s) => nft("UMINA_TOKEN_ID", s.serial))],
+      stoneId: plan.achalaId,
+      fields: achalaSaleFields(plan.stones, env.UMINA_TOKEN_ID),
+      stones: plan.stones,
+    };
+  }
+  const mounted = mountedProblem(events, ids);
+  if (mounted) return { problems: [mounted] };
+  return { problems: [], nftIds: [nft("UMINA_TOKEN_ID", serial)], fields: {}, stones: [] };
 }

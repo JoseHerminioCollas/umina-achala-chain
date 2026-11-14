@@ -12,12 +12,10 @@ import { TopicCreateTransaction } from "@hashgraph/sdk";
 import { parseEcdsaKey } from "../keys.js";
 import { envProblems, isHederaId } from "../env.js";
 import { topicInfo } from "../mirror.js";
+import ua from "../../config/umina-achala.js";
 
-/** The two topics: the env variable that holds each ID, and its memo. */
-export const TOPICS = {
-  provenance: { envVar: "HCS_TOPIC_ID", memo: "Umiña Achala provenance" },
-  display: { envVar: "HCS_DISPLAY_TOPIC_ID", memo: "Umiña Achala display" },
-};
+/** The two topics: the env variable that holds each ID, and its memo (config/umina-achala.js). */
+export const TOPICS = ua.topics;
 
 const KEY_NAMES = ["OPERATOR_KEY", "HCS_SUBMIT_KEY", "HCS_ADMIN_KEY"];
 

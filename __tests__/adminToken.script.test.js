@@ -1,6 +1,7 @@
 import { jest } from "@jest/globals";
 import { mockMirror, restoreMirror } from "../testHelpers/mockMirror.js";
 import { PrivateKey, Status } from "@hashgraph/sdk";
+import { actualSdk } from "../testHelpers/actualSdk.js";
 
 // Runs src/token/adminToken.js itself (it calls main() on import) with
 // Hedera and dotenv mocked, and records what it sends.
@@ -54,7 +55,7 @@ function mockDependencies({ holder = "0.0.6006", hcsReceiptError, topicEvents = 
   calls.forTestnet = jest.fn(() => ({ setOperator: jest.fn().mockReturnThis(), close: calls.close }));
   jest.doMock("dotenv", () => ({ __esModule: true, default: { config: jest.fn() } }));
   jest.doMock("@hashgraph/sdk", () => ({
-    ...jest.requireActual("@hashgraph/sdk"),
+    ...actualSdk(),
     Client: { forTestnet: calls.forTestnet },
     TokenNftInfoQuery: jest.fn().mockImplementation(() => {
       const q = {

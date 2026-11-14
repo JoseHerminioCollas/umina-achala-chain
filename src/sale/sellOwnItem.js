@@ -1,12 +1,13 @@
 /**
  * @file sellOwnItem.js
  * @description Sells an NFT that UA holds itself, straight from the Treasury,
- * on Hedera (NETWORK, testnet by default), in one atomic transfer: the buyer
+ * on Hedera (NETWORK, required), in one atomic transfer: the buyer
  * pays the price in HBAR to UA, and the Treasury sends the NFT to the buyer.
  * The sale is then recorded as SALE in HCS (umina-achala-chain#19).
  *
- * Run from the command line:
- * node src/sale/sellOwnItem.js <serial> <price-hbar> [--token umina|achala] [--dry-run]
+ * Run from the command line, with NETWORK set (testnet or mainnet; it has no
+ * default and the script refuses to run without it, see src/network.js):
+ * NETWORK=testnet node src/sale/sellOwnItem.js <serial> <price-hbar> [--token umina|achala] [--dry-run]
  *
  * An Umiña (a stone, the default) is refused while it is mounted in an
  * Achala that still exists: it moves only with its Achala (#24).
@@ -38,10 +39,10 @@ import {
   Hbar,
   NftId,
   TokenId,
-  TokenNftInfoQuery,
   TransferTransaction,
 } from "@hashgraph/sdk";
 import { parseSaleArgs, saleProblems } from "./lib.js";
+import { holderProblems, readHolders } from "../nfts.js";
 import { parseEcdsaKey } from "../keys.js";
 import { buildEvent, loadSubmitKey, submitEvent } from "../hcs.js";
 import { mountIds, readProvenance } from "../provenance.js";
@@ -59,7 +60,7 @@ const USAGE = `Sell an item UA holds itself, from the Treasury, in one transfer:
 pays UA and the NFT goes to the buyer (an Achala with its stones). Recorded
 as SALE.
 
-Usage: node src/sale/sellOwnItem.js <serial> <price-hbar> [--token umina|achala] [--dry-run]
+Usage: NETWORK=testnet node src/sale/sellOwnItem.js <serial> <price-hbar> [--token umina|achala] [--dry-run]
 
   <serial>               the NFT serial, held by the Treasury
   <price-hbar>           the price in HBAR
@@ -113,16 +114,12 @@ runScript("Sale failed", async (session) => {
     return;
   }
 
-  // --- 3. Connect to Hedera as UA ---
-  const client = session.connect();
+  // --- 3. Check the Treasury still holds every NFT that moves (mirror node, nfts.js) ---
+  const held = holderProblems(nftIds, await readHolders(nftIds), treasuryId.toString());
+  if (held.length) return fail(held);
 
-  // --- 4. Check the Treasury still holds every NFT that moves ---
-  for (const id of nftIds) {
-    const [info] = await new TokenNftInfoQuery().setNftId(id).execute(client);
-    if (info.accountId.toString() !== treasuryId.toString()) {
-      return fail([`${id} is held by ${info.accountId}, not the Treasury ${treasuryId}. Remove the listing.`]);
-    }
-  }
+  // --- 4. Connect to Hedera as UA ---
+  const client = session.connect();
 
   // --- 5. One atomic transfer: the price to UA, the NFT(s) to the buyer ---
   let saleTx = new TransferTransaction()

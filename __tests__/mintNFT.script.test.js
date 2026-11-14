@@ -3,6 +3,7 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 import { PrivateKey } from "@hashgraph/sdk";
+import { actualSdk } from "../testHelpers/actualSdk.js";
 
 // Runs src/mint/mintNFT.js itself (it calls main() on import) with Hedera,
 // Pinata (fetch) and dotenv mocked, and records what it sends.
@@ -40,7 +41,7 @@ function mockDependencies({
   }));
 
   jest.doMock("@hashgraph/sdk", () => ({
-    ...jest.requireActual("@hashgraph/sdk"),
+    ...actualSdk(),
     Client: { forTestnet: calls.forTestnet },
     TokenMintTransaction: jest.fn().mockImplementation(() => {
       const tx = {
@@ -480,11 +481,11 @@ describe("mintNFT.js", () => {
     expect(process.exitCode).toBe(1);
   });
 
-  test("refuses more than 5 photos besides main_image", async () => {
+  test("refuses more than 20 photos besides main_image (#35)", async () => {
     mockDependencies();
-    await runScript(writeMetadata(() => {}, ["a.jpg", "b.jpg", "c.jpg", "d.jpg", "e.jpg", "f.jpg", "g.jpg"]));
+    await runScript(writeMetadata(() => {}, Array.from({ length: 22 }, (_, i) => `${i}.jpg`)));
 
-    expect(console.error).toHaveBeenCalledWith("   - images lists 6 photos; at most 5 besides main_image");
+    expect(console.error).toHaveBeenCalledWith("   - images lists 21 photos; at most 20 besides main_image");
     expect(calls.order).toEqual([]);
   });
 

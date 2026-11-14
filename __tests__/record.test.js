@@ -1,13 +1,10 @@
 import { PrivateKey } from "@hashgraph/sdk";
 import {
-  checkProof,
   consensusDate,
   deliveredFields,
-  deliveryProofMessage,
   findDelivery,
   findSaleByRef,
   hbarToTinybars,
-  hederaSignedMessage,
   latestSaleTo,
   paidTinybars,
   parseRecordArgs,
@@ -15,6 +12,7 @@ import {
   saleFields,
   saleLedgerProblems,
 } from "../src/record/lib.js";
+import { checkProof, deliveryProofMessage, hederaSignedMessage } from "../src/record/proof.js";
 
 const TOKEN = "0.0.2002";
 const SELLER = "0.0.4004";

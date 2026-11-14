@@ -2,6 +2,7 @@ import { jest } from "@jest/globals";
 import { mockMirror, restoreMirror } from "../testHelpers/mockMirror.js";
 import { PrivateKey } from "@hashgraph/sdk";
 import { saleProblems } from "../src/sale/lib.js";
+import { actualSdk } from "../testHelpers/actualSdk.js";
 
 // Runs src/sale/sellOwnItem.js itself (it calls main() on import) with Hedera
 // and dotenv mocked, and records what it sends.
@@ -44,21 +45,14 @@ function mockTransaction(name, { executeError, receiptError, txId } = {}) {
 }
 
 function mockDependencies({ holder = "0.0.1001", saleError, hcsReceiptError, topicEvents = [] } = {}) {
-  calls.mirror = mockMirror(topicEvents);
+  calls.mirror = mockMirror(topicEvents, { holder });
   calls.steps = [];
   calls.close = jest.fn();
   calls.forTestnet = jest.fn(() => ({ setOperator: jest.fn().mockReturnThis(), close: calls.close }));
   jest.doMock("dotenv", () => ({ __esModule: true, default: { config: jest.fn() } }));
   jest.doMock("@hashgraph/sdk", () => ({
-    ...jest.requireActual("@hashgraph/sdk"),
+    ...actualSdk(),
     Client: { forTestnet: calls.forTestnet },
-    TokenNftInfoQuery: jest.fn().mockImplementation(() => {
-      const q = {
-        setNftId: (id) => ((calls.infoFor = id.toString()), q),
-        execute: async () => [{ accountId: { toString: () => holder } }],
-      };
-      return q;
-    }),
     TransferTransaction: mockTransaction("sale", {
       executeError: saleError,
       txId: "0.0.1001@1700000000.7",
@@ -230,7 +224,7 @@ describe("sellOwnItem.js", () => {
     mockDependencies({ holder: "0.0.7007" });
     await runScript("7", "100");
 
-    expect(calls.infoFor).toBe("0.0.2002/7");
+    expect(calls.mirror).toContain("https://testnet.mirrornode.hedera.com/api/v1/tokens/0.0.2002/nfts/7");
     expect(console.error).toHaveBeenCalledWith(
       "   - 0.0.2002/7 is held by 0.0.7007, not the Treasury 0.0.1001. Remove the listing.",
     );
