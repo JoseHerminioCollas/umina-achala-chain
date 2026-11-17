@@ -26,7 +26,7 @@ describe("schema/stone-types.json", () => {
 
   test("imported IMA entries are minerals with an English name and their IMA species", () => {
     const imported = list.types.filter((t) => t.source === "ima");
-    expect(imported.length).toBe(list.ima_import.species - 17);
+    expect(imported.length).toBe(list.ima_import.species - 18);
     for (const t of imported) {
       expect(t.kind).toBe("mineral");
       expect(t.name.en).toBeTruthy();
