@@ -7,6 +7,7 @@
  * - properties.vendor_ruc and properties.reinfo_id (the miner's RUC) have a
  *   valid SUNAT check digit; mining_concession is a 9-digit Código Único
  *   (the schema checks that)
+ * - a certificate of the stone's type names its stone_type (#38)
  * - for an Achala, achalaProblems in achala.js: each stone listed once, each
  *   metal a metal, and where the metal comes from
  */
@@ -14,6 +15,7 @@ import Ajv from "ajv";
 import addFormats from "ajv-formats";
 import { stoneTypeProblems } from "./stoneTypes.js";
 import { achalaProblems } from "./achala.js";
+import { identificationProblems } from "./certifications.js";
 import { TOKEN_CLASSES } from "../token/lib.js";
 
 const ajv = new Ajv({ allErrors: true, allowUnionTypes: true });
@@ -47,7 +49,7 @@ export function complianceErrors(metadata, tokenClass = "umina") {
   const problems =
     tokenClass === "achala"
       ? achalaProblems(properties, Array.isArray(metadata?.files) ? metadata.files : [])
-      : stoneTypeProblems(properties);
+      : [...stoneTypeProblems(properties), ...identificationProblems(properties)];
   const errors = problems.map((message) => ({ instancePath: "/properties", message }));
   // REINFO profiles are tracked by the miner's RUC, so reinfo_id is a RUC too
   for (const field of ["vendor_ruc", "reinfo_id"]) {

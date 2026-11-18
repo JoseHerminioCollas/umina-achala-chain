@@ -67,6 +67,35 @@
           "description": "REINFO is tracked by the miner's RUC: 11 digits; metadataValidator.js also checks its check digit (umina-achala-chain#5)"
         },
         "reinfo_status": { "type": "string", "description": "REINFO status at mint. Later changes are HCS events (umina-achala-chain#10), since metadata is immutable." },
+        "certifications": {
+          "type": "array",
+          "minItems": 1,
+          "description": "Third-party certificates of the stone's type and/or quality, one per certificate (umina-achala-chain#38). metadataValidator.js checks a certificate of type names the stone_type; the mint checks each document is one of the post's documents and sets its ipfs:// URI.",
+          "items": {
+            "type": "object",
+            "required": ["issuer", "report_no", "date", "covers", "document"],
+            "additionalProperties": false,
+            "properties": {
+              "issuer": { "type": "string", "minLength": 1 },
+              "report_no": { "type": "string", "minLength": 1 },
+              "date": { "type": "string", "format": "date" },
+              "verify_url": { "type": "string", "format": "uri" },
+              "covers": {
+                "type": "array",
+                "minItems": 1,
+                "uniqueItems": true,
+                "items": { "type": "string", "enum": ["type", "quality"] }
+              },
+              "identification": { "type": "string", "minLength": 1, "description": "The certifier's wording of what the stone is; required when covers includes type" },
+              "grade": { "type": "string", "minLength": 1, "description": "The certifier's grade, shown beside UA's own Grading; required when covers includes quality" },
+              "document": { "type": "string", "pattern": "^ipfs://.*", "description": "The pinned report, one of the post's documents" }
+            },
+            "allOf": [
+              { "if": { "properties": { "covers": { "type": "array", "contains": { "const": "type" } } } }, "then": { "required": ["identification"] } },
+              { "if": { "properties": { "covers": { "type": "array", "contains": { "const": "quality" } } } }, "then": { "required": ["grade"] } }
+            ]
+          }
+        },
         "cod_reference": { "type": "string" },
         "standard_compliance": { "type": "string" },
         "compliance_proof_hcs": { "type": "string", "description": "Transaction ID of the COMPLIANCE event posted to the provenance topic before the metadata was pinned (set by the mint script)" },

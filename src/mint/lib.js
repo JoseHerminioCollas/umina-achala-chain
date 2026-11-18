@@ -11,6 +11,7 @@ import { parseArgs } from "util";
 import { envProblems } from "../env.js";
 import { submitKeyProblem } from "../hcs.js";
 import { MAX_OTHER_IMAGES } from "./images.js";
+import { builtName } from "./names.js";
 import { TOKEN_CLASSES, tokenClassProblem } from "../token/lib.js";
 
 /** The stone_id pattern of a class: <idPrefix>-YYYY-XX-NN, e.g. UMINA-2026-CH-03. */
@@ -269,6 +270,14 @@ export function buildMetadata(metadata, images, cidsByFile = new Map(), document
     ...rest,
     files: [...(rest.files ?? []), ...images.map(master), ...documents.map(document)],
   };
+  // A certificate's report is one of the documents: link it by its URI (#38)
+  if (Array.isArray(built.properties?.certifications)) {
+    built.properties.certifications = built.properties.certifications.map((c) =>
+      typeof c?.document === "string" && !c.document.startsWith("ipfs://")
+        ? { ...c, document: uri({ file: c.document }) }
+        : c,
+    );
+  }
   const main = images.find((img) => img.main);
   if (main) {
     built.image = uri(main.versions.display);
@@ -283,6 +292,7 @@ export function buildMetadata(metadata, images, cidsByFile = new Map(), document
  * `files` with placeholders when they are absent. Each document of a
  * supported type becomes a placeholder file of that type, as buildMetadata
  * makes it, so checks that need a document (an invoice for a metal) see it.
+ * The name is the one the mint builds (#38).
  */
 export function withPlaceholderAssets(metadata) {
   const { main_image: _main, images: _images, documents, ...rest } = structuredClone(metadata);
@@ -290,7 +300,7 @@ export function withPlaceholderAssets(metadata) {
     const type = DOCUMENT_TYPES[path.extname(String(doc?.file ?? "")).toLowerCase()];
     return type ? [{ uri: "ipfs://pending", type, metadata: { description: doc.description ?? "" } }] : [];
   });
-  return { ...rest, image: rest.image ?? "ipfs://pending", files: rest.files ?? documentFiles };
+  return { ...rest, name: builtName(rest), image: rest.image ?? "ipfs://pending", files: rest.files ?? documentFiles };
 }
 
 /** Pins a file to IPFS through Pinata and returns its CID. */

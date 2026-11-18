@@ -51,17 +51,23 @@ function prune(object) {
 /**
  * Fills a copy of the template from a form post. Every field other than name,
  * description, creator, attributes, images and documents goes under `properties`.
- * Empty fields are removed.
+ * Empty fields are removed. The post's name is not copied: the mint builds it,
+ * and prepareMint refuses a post that has one (umina-achala-chain#38).
  */
 export function metadataFromForm(form, template, baseDir) {
   const filled = structuredClone(template);
-  filled.name = form.name;
   filled.description = form.description;
   if (form.creator) filled.creator = form.creator;
   filled.properties = prune({
     ...filled.properties,
     ...Object.fromEntries(Object.entries(form).filter(([key]) => !RESERVED.includes(key))),
   });
+  // A certificate's report names a file of the post, like the uploads (#38)
+  if (Array.isArray(filled.properties.certifications)) {
+    filled.properties.certifications = filled.properties.certifications.map((c) =>
+      typeof c?.document === "string" && c.document ? { ...c, document: path.resolve(baseDir, c.document) } : c,
+    );
+  }
   filled.attributes = toAttributes(form.attributes);
   if (form.main_image) filled.main_image = resolveUploads([form.main_image], baseDir)[0];
   filled.images = resolveUploads(form.images, baseDir);

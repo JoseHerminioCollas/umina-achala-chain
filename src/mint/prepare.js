@@ -21,6 +21,8 @@ import {
   validateMintEnv,
 } from "./lib.js";
 import { metadataFromForm, writeGeneratedMetadata } from "./formPost.js";
+import { documentProblems as certificationDocumentProblems } from "./certifications.js";
+import { typedNameProblem } from "./names.js";
 
 /**
  * Prepares a mint. Returns the problems found (empty when the mint can go
@@ -41,11 +43,18 @@ export async function prepareMint(input, steps, env) {
   if (formFile) {
     // Simulated form post: generate the metadata file from it first
     const form = JSON.parse(fs.readFileSync(formFile, "utf8"));
+    const named = typedNameProblem(form, formFile);
+    if (named) problems.push(named);
     const template = JSON.parse(fs.readFileSync(MINT_CLASSES[tokenClass].template, "utf8"));
     const generated = metadataFromForm(form, template, path.dirname(path.resolve(formFile)));
     metadataFile = generatedFile = writeGeneratedMetadata(steps.fill(generated, env), outDir);
   }
-  const metadata = steps.fill(JSON.parse(fs.readFileSync(metadataFile, "utf8")), env);
+  const read = JSON.parse(fs.readFileSync(metadataFile, "utf8"));
+  if (!formFile) {
+    const named = typedNameProblem(read, metadataFile);
+    if (named) problems.push(named);
+  }
+  const metadata = steps.fill(read, env);
   problems.push(...steps.inputProblems(metadata, env, { imagesOnly }));
 
   const baseDir = path.dirname(path.resolve(metadataFile));
@@ -53,6 +62,11 @@ export async function prepareMint(input, steps, env) {
   problems.push(...imageProblems);
   const { documents, problems: documentProblems } = collectDocuments(metadata, baseDir);
   problems.push(...documentProblems);
+  // Each certificate's report must be one of the documents; its path is
+  // resolved so buildMetadata can swap in the pinned URI (#38)
+  const certified = certificationDocumentProblems(metadata.properties, documents, baseDir);
+  problems.push(...certified.problems);
+  if (certified.certifications) metadata.properties.certifications = certified.certifications;
   const uploads = [...images, ...documents];
   const testnetProblem = testnetFolderProblem(uploads, path.resolve("testnet"));
   if (testnetProblem) problems.push(testnetProblem);
@@ -71,8 +85,9 @@ export async function prepareMint(input, steps, env) {
     }
   }
   if (!problems.length) {
-    // The files have no CIDs yet, so check the schema with placeholder URIs
-    const { valid, errors } = validateMetadata(buildMetadata(metadata, images, undefined, documents), tokenClass);
+    // The files have no CIDs yet, so check the schema with placeholder URIs;
+    // the name is built as the mint builds it (#38)
+    const { valid, errors } = validateMetadata(buildMetadata(steps.withName(metadata), images, undefined, documents), tokenClass);
     if (!valid) {
       errors.forEach((e) =>
         problems.push(`${metadataFile} failed validation: ${e.instancePath || "/"} ${e.message}`),

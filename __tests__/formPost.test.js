@@ -9,7 +9,6 @@ const schema = JSON.parse(fs.readFileSync("schema/hip412-umina-schema.json", "ut
 const base = path.join(os.tmpdir(), "form-post");
 
 const form = () => ({
-  name: "Stone",
   description: "A stone",
   stone_id: "UMINA-2026-CH-99",
   hs_code: "7103.99.00.00",
@@ -21,7 +20,7 @@ const form = () => ({
 describe("metadataFromForm", () => {
   test("takes the fixed fields from the template and the rest from the post", () => {
     const metadata = metadataFromForm(form(), template, base);
-    expect(metadata.name).toBe("Stone");
+    expect(metadata).not.toHaveProperty("name"); // built by the mint (#38)
     expect(metadata.description).toBe("A stone");
     expect(metadata.creator).toBe(template.creator);
     expect(metadata.format).toBe(template.format);

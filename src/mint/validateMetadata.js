@@ -6,6 +6,7 @@
  */
 import fs from "fs";
 import { withPlaceholderAssets } from "./lib.js";
+import { typedNameProblem } from "./names.js";
 import { classOfMetadata, validateMetadata } from "./metadataValidator.js";
 import { TOKEN_CLASSES } from "../token/lib.js";
 
@@ -16,7 +17,12 @@ if (!filePath) {
 }
 
 const metadata = JSON.parse(fs.readFileSync(filePath, "utf8"));
-// image and files are filled in at mint time, so check with placeholders
+const named = typedNameProblem(metadata, filePath);
+if (named) {
+  console.error(`❌ ${named}`);
+  process.exit(1);
+}
+// image, files and the name are filled in at mint time, so check with placeholders
 const tokenClass = classOfMetadata(metadata);
 const { valid, errors } = validateMetadata(withPlaceholderAssets(metadata), tokenClass);
 

@@ -755,7 +755,6 @@ describe("mintNFT.js", () => {
     fs.writeFileSync(path.join(dir, "front.jpg"), photo);
     fs.writeFileSync(path.join(dir, "receipt.pdf"), "data");
     const post = {
-      name: "Stone from the form",
       description: "Posted through the mint form",
       stone_id: "UMINA-2026-CH-77",
       stone_type: "chrysocolla",
@@ -778,6 +777,32 @@ describe("mintNFT.js", () => {
     return { file, outDir: path.join(dir, "generated") };
   }
 
+  test("refuses a metadata file that types its own name (#38)", async () => {
+    mockDependencies();
+    const file = writeMetadata((m) => {
+      m.name = "Umiña Stone #03";
+    });
+    await runScript(file, "--dry-run");
+
+    expect(console.error).toHaveBeenCalledWith(expect.stringContaining('has a name ("Umiña Stone #03")'));
+    expect(calls.order).toEqual([]);
+    expect(process.exitCode).toBe(1);
+  });
+
+  test("--form refuses a post that types its own name, before anything is sent (#38)", async () => {
+    mockDependencies();
+    const { file, outDir } = writeFormPost((post) => {
+      post.name = "Umiña Stone #99 - Chrysocolla";
+    });
+    await runScript("--form", file, "--out", outDir, "--dry-run");
+
+    expect(console.error).toHaveBeenCalledWith(
+      `   - ${file} has a name ("Umiña Stone #99 - Chrysocolla"): the mint builds the name from the type and the stone_id; remove it (umina-achala-chain#38)`,
+    );
+    expect(calls.order).toEqual([]);
+    expect(process.exitCode).toBe(1);
+  });
+
   test("--form generates the metadata file from the post, then mints it", async () => {
     mockDependencies();
     const { file, outDir } = writeFormPost();
@@ -789,7 +814,7 @@ describe("mintNFT.js", () => {
 
     expect(calls.order).toEqual(["compliance", "pinFile", "pinFile", "pinFile", "pin", "mint", "hcs"]);
     const pinned = calls.pin.body.pinataContent;
-    expect(pinned.name).toBe("Stone from the form");
+    expect(pinned.name).toBe("Chrysocolla · UMINA-2026-CH-77");
     expect(pinned.attributes).toEqual([
       { trait_type: "Stone Type", value: "Chrysocolla" },
       { trait_type: "Form", value: "Worked" },
@@ -1040,7 +1065,6 @@ describe("mintNFT.js", () => {
     fs.writeFileSync(path.join(dir, "front.jpg"), photo);
     // A form post of its own: the sample posts live in the git-ignored testnet/ link
     const post = {
-      name: "Achala Pendant #99 - Chrysocolla in Gold",
       description: "Test pendant submitted through the mint form.",
       stone_id: "ACHALA-2026-PE-99",
       piece_type: "pendant",
@@ -1061,7 +1085,9 @@ describe("mintNFT.js", () => {
     fs.writeFileSync(file, JSON.stringify(post));
     await runScript("--form", file, "--token", "achala", "--out", path.join(dir, "generated"));
 
-    const { properties } = calls.pin.body.pinataContent;
+    const { properties, name } = calls.pin.body.pinataContent;
+    // The stone is the piece's metal here, so it is named as the metal (#38)
+    expect(name).toBe("Pendant in gold · ACHALA-2026-PE-99");
     expect(properties.umina_token_id).toBe("0.0.2002");
     expect(properties.stones).toEqual([{ serial: 3, stone_id: "UMINA-2026-CH-03" }]);
     const generated = JSON.parse(fs.readFileSync(path.join(dir, "generated", "ACHALA-2026-PE-99.json"), "utf8"));

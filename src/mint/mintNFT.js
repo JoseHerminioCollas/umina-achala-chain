@@ -91,7 +91,7 @@ export const done = runScript("Unexpected error during minting workflow", async 
   if (imagesOnly) {
     assets.forEach((a) => console.log(`Would pin ${a.file} (${a.mime})`));
     console.log("Would pin this metadata (CIDs pending):");
-    console.log(JSON.stringify(buildMetadata(steps.withAttributes(metadata), images, undefined, documents), null, 2));
+    console.log(JSON.stringify(buildMetadata(steps.withName(steps.withAttributes(metadata)), images, undefined, documents), null, 2));
     const show = (name) => process.env[name] || "not set";
     console.log(`Would record COMPLIANCE, mint under ${show(tokenVar)} and record MINT in ${show("HCS_TOPIC_ID")}.`);
     console.log("Images only: nothing pinned, minted or recorded.");
@@ -147,7 +147,7 @@ export const done = runScript("Unexpected error during minting workflow", async 
   try {
     minted = await pinAndMint(client, {
       stoneId,
-      metadata: steps.withAttributes(metadata, ledger.context),
+      metadata: steps.withName(steps.withAttributes(metadata, ledger.context), ledger.context),
       images,
       documents,
       assets,

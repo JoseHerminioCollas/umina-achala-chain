@@ -19,11 +19,12 @@
 
 import { STONE_TYPES, stoneTypeProblem } from "./stoneTypes.js";
 import { nftInfo } from "../mirror.js";
+import { achalaName } from "./names.js";
 
 /** Attribute names the mint script writes for an Achala. */
 const ACHALA_TRAITS = ["Piece Type", "Metal", "Stones", "Artisan"];
 
-const PIECE_NAMES = {
+export const PIECE_NAMES = {
   ring: "Ring",
   pendant: "Pendant",
   necklace: "Necklace",
@@ -360,6 +361,12 @@ export const mintSteps = {
 
   /** Piece Type, Metal, Stones and Artisan; Stones by type name once checked. */
   withAttributes: (metadata, context = {}) => withAchalaAttributes(metadata, context.stoneTypeById),
+
+  /** The name, built from the piece, its stones and metals, and its stone_id (#38). */
+  withName: (metadata, context = {}) => ({
+    ...metadata,
+    name: achalaName(metadata.properties, context.stoneTypeById),
+  }),
 
   complianceFields: (properties) => achalaComplianceFields(properties),
 
