@@ -288,11 +288,12 @@ describe("sellConsigned.js", () => {
       ["0.0.2002/3", "0.0.4004", "0.0.6006"],
       ["0.0.2002/4", "0.0.4004", "0.0.6006"],
     ]);
-    // One payment for the piece: the same legs as a single stone
+    // One payment for the piece, sized for two royalties (Achala and Umiña
+    // tokens, #28): 77.78 / 22.22, then 70 / 30 after HTS takes 2 × 5%
     expect(hbarMoves(step("sale"))).toEqual([
       ["0.0.6006", "-10000000000"],
-      ["0.0.4004", "7368421053"],
-      ["0.0.1001", "2631578947"],
+      ["0.0.4004", "7777777778"],
+      ["0.0.1001", "2222222222"],
     ]);
     expect(callsTo(step("sale"), "setTransactionMemo")).toEqual([["Achala sale 0.0.8008/1"]]);
     expect(hcsMessage()).toMatchObject({

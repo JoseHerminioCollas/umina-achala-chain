@@ -8,11 +8,11 @@
  * notarized in HCS as one SALE (umina-achala-chain#18, #28).
  *
  * The merchant ends with 70% and UA with 30%, the royalty included
- * (umina-achala-chain#30): HTS takes the 5% royalty from the merchant's leg
- * and pays it to the Treasury, so the merchant's leg is 70% / 0.95 (73.68 on
- * 100) and UA's the rest (26.32). See consignmentSplit in lib.js. How the
- * royalty applies when an Achala moves with its stones (N+1 NFTs, one
- * payment) is checked on testnet (#22).
+ * (umina-achala-chain#30): HTS takes the 5% royalty from the merchant's leg,
+ * once per token among the NFTs that move, and pays it to the Treasury
+ * (testnet, #22, #28). So the merchant's leg is 70% / 0.95 for an Umiña
+ * (73.68 on 100) and 70% / 0.90 for an Achala with its stones (77.78), and
+ * UA's the rest. See consignmentSplit and royaltyCount in lib.js.
  *
  * Run from the command line, with NETWORK set (testnet or mainnet; it has no
  * default and the script refuses to run without it, see src/network.js):
@@ -29,7 +29,7 @@
  */
 
 import { AccountId, Hbar, TokenId, TransactionId, TransferTransaction } from "@hashgraph/sdk";
-import { consignmentNfts, consignmentProblems, consignmentSplit, tokenVars } from "./lib.js";
+import { consignmentNfts, consignmentProblems, consignmentSplit, royaltyCount, tokenVars } from "./lib.js";
 import { buildEvent, loadSubmitKey, submitEvent, submitKeyProblem } from "../hcs.js";
 import { parseEcdsaKey } from "../keys.js";
 import { readProvenance } from "../provenance.js";
@@ -92,8 +92,10 @@ export const done = runScript("Sale failed", async (session) => {
   if (held.length) return fail(held);
 
   const priceTinybars = BigInt(new Hbar(Number(price)).toTinybars().toString());
-  const split = consignmentSplit(priceTinybars);
-  console.log(`Sale of ${nftIds.join(", ")} for ${tinybars(priceTinybars)}:`);
+  const royalties = royaltyCount(nftIds);
+  const split = consignmentSplit(priceTinybars, undefined, royalties);
+  const each = royalties === 1 ? "1 royalty" : `${royalties} royalties, one per token`;
+  console.log(`Sale of ${nftIds.join(", ")} for ${tinybars(priceTinybars)} (${each}: ${tinybars(split.royalty)} from the merchant to UA):`);
   console.table({
     merchant: {
       paid: tinybars(split.merchant).toString(),

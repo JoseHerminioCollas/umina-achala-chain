@@ -4,6 +4,7 @@ import {
   consignmentProblems,
   consignmentSplit,
   roleProblems,
+  royaltyCount,
   tokenVars,
 } from "../src/consignment/lib.js";
 
@@ -32,15 +33,58 @@ describe("roleProblems", () => {
   });
 });
 
+describe("royaltyCount (umina-achala-chain#28)", () => {
+  const nft = (token, serial) => ({ tokenId: { toString: () => token }, serial });
+
+  test("one per token: an Umiña alone 1, an Achala with stones 2, however many stones", () => {
+    expect(royaltyCount([nft("0.0.5", 1)])).toBe(1);
+    expect(royaltyCount([nft("0.0.8", 3), nft("0.0.5", 7)])).toBe(2);
+    expect(royaltyCount([nft("0.0.8", 5), nft("0.0.5", 10), nft("0.0.5", 11), nft("0.0.5", 12)])).toBe(2);
+  });
+});
+
 describe("consignmentSplit (umina-achala-chain#30)", () => {
   test("100 HBAR: legs 73.68 / 26.32, then 70 / 30 after the 5% royalty", () => {
     expect(consignmentSplit(10_000_000_000n)).toEqual({
       merchant: 7_368_421_053n,
       ua: 2_631_578_947n,
       royalty: 368_421_052n,
+      royalties: 1,
       merchantNet: 7_000_000_001n,
       uaNet: 2_999_999_999n,
     });
+  });
+
+  test("an Achala with its stones pays two royalties (one per token, #28): 200 HBAR ends 140 / 60", () => {
+    // Testnet, #22: Achala D with quartz D for 200 HBAR paid 2 × 7.368 when the
+    // split assumed one royalty, leaving the merchant 66.3%. With two:
+    expect(consignmentSplit(20_000_000_000n, undefined, 2)).toEqual({
+      merchant: 15_555_555_556n,
+      ua: 4_444_444_444n,
+      royalty: 1_555_555_554n,
+      royalties: 2,
+      merchantNet: 14_000_000_002n,
+      uaNet: 5_999_999_998n,
+    });
+  });
+
+  test("with k royalties the legs add up and the merchant ends with 70%, at most k + 1 tinybars over", () => {
+    // Over by at most 1 for rounding the leg up, plus 1 for each royalty rounded down
+    for (const k of [1, 2]) {
+      for (const price of [1n, 7n, 333n, 100_000_000n, 10_000_000_001n, 123_456_789_012n]) {
+        const s = consignmentSplit(price, undefined, k);
+        expect(s.merchant + s.ua).toBe(price);
+        expect(s.merchantNet + s.uaNet).toBe(price);
+        expect(s.merchantNet * 10n).toBeGreaterThanOrEqual(price * 7n);
+        expect(s.merchantNet - (price * 7n) / 10n).toBeLessThanOrEqual(BigInt(k + 1));
+      }
+    }
+  });
+
+  test("rejects a royalty count that is not a positive whole number, or one that takes the whole leg", () => {
+    expect(() => consignmentSplit(100n, undefined, 0)).toThrow("royalties");
+    expect(() => consignmentSplit(100n, undefined, 1.5)).toThrow("royalties");
+    expect(() => consignmentSplit(100n, undefined, 20)).toThrow("whole leg");
   });
 
   test("the legs add up to the price, and the merchant ends with at least 70%", () => {
@@ -63,6 +107,7 @@ describe("consignmentSplit (umina-achala-chain#30)", () => {
       merchant: 7_000_000_000n,
       ua: 3_000_000_000n,
       royalty: 0n,
+      royalties: 1,
       merchantNet: 7_000_000_000n,
       uaNet: 3_000_000_000n,
     });
