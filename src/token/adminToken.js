@@ -126,7 +126,8 @@ runScript("Token admin failed", async (session) => {
     const mounted = mountedStoneProblem(events, process.env, input.serial);
     if (mounted) return fail([`${mounted}; burn the Achala first (--token achala)`]);
   }
-  console.log(`Would ${describe(input, process.env, tokenId)}, signed by ${key}.`);
+  // "Would …" only on a dry run; a real run says what it is about to send
+  console.log(`${input.dryRun ? "Would" : "About to"} ${describe(input, process.env, tokenId)}, signed by ${key}.`);
   if (input.dryRun) {
     console.log("Dry run, nothing sent.");
     return;

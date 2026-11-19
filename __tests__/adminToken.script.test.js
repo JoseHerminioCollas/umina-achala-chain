@@ -218,6 +218,16 @@ describe("adminToken.js", () => {
     expect(calls.forTestnet).not.toHaveBeenCalled();
   });
 
+  test("a real run says what it is about to send, not what it would do", async () => {
+    mockDependencies();
+    await runScript("fees", "--fallback-hbar", "38");
+
+    expect(console.log).toHaveBeenCalledWith(
+      "About to set the fees of 0.0.2002: 5% royalty to 0.0.1001, fallback fee 38 HBAR, signed by FEE_SCHEDULE_KEY.",
+    );
+    expect(console.log).not.toHaveBeenCalledWith(expect.stringMatching(/^Would /));
+  });
+
   test("--token achala burns an Achala NFT (a disassembled piece) and records BURN under that token", async () => {
     process.env.ACHALA_TOKEN_ID = "0.0.4004";
     mockDependencies({ holder: "0.0.1001" });
