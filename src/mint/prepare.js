@@ -1,7 +1,7 @@
 /**
  * @file mint/prepare.js
  * @description Step 1 of mintNFT.js (umina-achala-chain#34): read the input,
- * check the environment and the metadata, and plan the image versions. It
+ * check the environment and the metadata, and plan the image files. It
  * sends nothing; the only file it writes is the metadata generated from a
  * form post (--form).
  */
@@ -9,7 +9,7 @@
 import fs from "fs";
 import path from "path";
 import { validateMetadata } from "./metadataValidator.js";
-import { inspectImage, planVersions } from "./images.js";
+import { inspectImage, planVersion } from "./images.js";
 import {
   buildMetadata,
   checkStoneId,
@@ -27,7 +27,7 @@ import { typedNameProblem } from "./names.js";
 /**
  * Prepares a mint. Returns the problems found (empty when the mint can go
  * on) and what the next steps need: the metadata, its photos with their
- * planned versions in <outDir>/<stone_id>/, its documents, and the generated
+ * planned files in <outDir>/<stone_id>/, its documents, and the generated
  * metadata file when the input was a form post.
  * @param {{ metadataFile?: string, formFile?: string, outDir: string, tokenClass: string, imagesOnly: boolean }} input
  * @param {object} steps the class's mint steps (umina.js or achala.js)
@@ -74,14 +74,14 @@ export async function prepareMint(input, steps, env) {
   const idProblem = checkStoneId(metadata.properties?.stone_id, tokenClass);
   if (idProblem) problems.push(idProblem);
 
-  // Check each photo from its header (type, size, pixels) and plan its
-  // versions in <outDir>/<stone_id>/ (#7); nothing is written yet
+  // Check each photo from its header (type, size, pixels, transparency) and
+  // plan its file in <outDir>/<stone_id>/ (#7, #42); nothing is written yet
   if (!problems.length) {
     const stoneDir = path.join(outDir, metadata.properties.stone_id);
     for (const image of images) {
       const info = await inspectImage(image.file, image.label);
       if (info.problem) problems.push(info.problem);
-      else Object.assign(image, { info, versions: planVersions(image, info, stoneDir) });
+      else Object.assign(image, { info, version: planVersion(image, info, stoneDir) });
     }
   }
   if (!problems.length) {

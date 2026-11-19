@@ -1,7 +1,7 @@
 /**
  * @file mint/publish.js
  * @description Step 4 of mintNFT.js (umina-achala-chain#34): pin the image
- * versions and documents to IPFS through Pinata, then the metadata JSON that
+ * files and documents to IPFS through Pinata, then the metadata JSON that
  * points to them, then mint one NFT whose metadata is that JSON's ipfs:// URI.
  */
 

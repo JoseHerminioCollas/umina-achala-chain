@@ -1,17 +1,18 @@
 /**
  * @file mint/images.js
- * @description Checks uploaded photos and makes the versions that get pinned
- * (umina-achala-chain#7), with sharp:
- * - master, for every photo: original size, the upload's own format (JPEG
- *   and WebP at masterQuality, PNG lossless), a files[] entry with a SHA-256
- *   checksum; the main image's master is the NFT's default file
- * - display, for the main image only: displaySize px on the long side, JPEG
- *   at displayQuality; becomes `image`, which wallets and marketplaces show
- * No thumbnails: the web site and the mobile app resize what they need
- * (decided 2026-11-05). Every version is auto-rotated from the EXIF
- * orientation and written without any metadata, so no EXIF, XMP or GPS
- * location reaches IPFS. Smaller photos are never enlarged. The limits and
- * qualities are in config/umina-achala.js (images).
+ * @description Checks uploaded photos and makes the one file pinned for each
+ * (umina-achala-chain#7, #42), with sharp. Every photo becomes a single
+ * version, at most maxSize px on the long side:
+ * - a photo with transparency: a PNG with a reduced palette (pngQuality),
+ *   so a wallet shows it on its own theme; slightly lossy, much smaller
+ * - a photo without: a JPEG at jpegQuality
+ * The main photo's file becomes `image`; the others go in `files[]`, each
+ * with a SHA-256 checksum. No master or display pair and no thumbnails: the
+ * web site and the mobile app resize what they need (decided 2026-11-05).
+ * Every file is auto-rotated from the EXIF orientation and written without
+ * any metadata, so no EXIF, XMP or GPS location reaches IPFS. Smaller photos
+ * are never enlarged. The limits and qualities are in config/umina-achala.js
+ * (images).
  */
 
 import crypto from "crypto";
@@ -24,14 +25,17 @@ export const {
   maxFileBytes: MAX_FILE_BYTES,
   maxPixels: MAX_PIXELS,
   maxOtherImages: MAX_OTHER_IMAGES,
-  displaySize: DISPLAY_SIZE,
+  maxSize: MAX_SIZE,
 } = ua.images;
-const { masterQuality, displayQuality } = ua.images;
+const { pngQuality, jpegQuality } = ua.images;
 
-const MASTER = {
-  jpeg: { ext: "jpg", mime: "image/jpeg", encode: (s) => s.jpeg({ quality: masterQuality }) },
-  png: { ext: "png", mime: "image/png", encode: (s) => s.png() },
-  webp: { ext: "webp", mime: "image/webp", encode: (s) => s.webp({ quality: masterQuality }) },
+/** The accepted upload formats. */
+const ACCEPTED = ["jpeg", "png", "webp"];
+
+/** The pinned format: PNG when the photo has transparency, JPEG otherwise. */
+const OUTPUT = {
+  png: { ext: "png", mime: "image/png", encode: (s) => s.png({ palette: true, quality: pngQuality, effort: 10 }) },
+  jpeg: { ext: "jpg", mime: "image/jpeg", encode: (s) => s.jpeg({ quality: jpegQuality, mozjpeg: true }) },
 };
 
 /** The size of a photo fitted inside `max` px on its long side, never enlarged. */
@@ -65,7 +69,7 @@ export async function inspectImage(file, label) {
       problem: `${label} is HEIC (an iPhone photo); export or share it as JPEG and upload that`,
     };
   }
-  if (!MASTER[meta.format]) {
+  if (!ACCEPTED.includes(meta.format)) {
     return { problem: `${label} is ${meta.format}; only JPEG, PNG and WebP are accepted` };
   }
   if (meta.width * meta.height > MAX_PIXELS) {
@@ -75,6 +79,7 @@ export async function inspectImage(file, label) {
   const turned = (meta.orientation ?? 1) >= 5;
   return {
     format: meta.format,
+    hasAlpha: Boolean(meta.hasAlpha),
     width: turned ? meta.height : meta.width,
     height: turned ? meta.width : meta.height,
     bytes: size,
@@ -82,50 +87,34 @@ export async function inspectImage(file, label) {
 }
 
 /**
- * The versions an image will become, with their file names in `stoneDir`
- * and their sizes, before anything is written: a master for every image,
- * and a display version for the main image only.
- * @param {{ index: number, main: boolean }} image index 1 is the main image
- * @param {{ format: string, width: number, height: number }} info from inspectImage
+ * The file a photo will become, with its name in `stoneDir` and its size,
+ * before anything is written: <nn>.png for a photo with transparency,
+ * <nn>.jpg otherwise, fitted inside MAX_SIZE.
+ * @param {{ index: number }} image index 1 is the main image
+ * @param {{ hasAlpha: boolean, width: number, height: number }} info from inspectImage
  * @param {string} stoneDir generated/<stone_id>
  */
-export function planVersions(image, info, stoneDir) {
-  const n = String(image.index).padStart(2, "0");
-  const master = MASTER[info.format];
+export function planVersion(image, info, stoneDir) {
+  const output = OUTPUT[info.hasAlpha ? "png" : "jpeg"];
   return {
-    master: {
-      file: path.join(stoneDir, `${n}-master.${master.ext}`),
-      mime: master.mime,
-      ...fitInside(info.width, info.height, Infinity),
-    },
-    ...(image.main && {
-      display: {
-        file: path.join(stoneDir, `${n}-display.jpg`),
-        mime: "image/jpeg",
-        ...fitInside(info.width, info.height, DISPLAY_SIZE),
-      },
-    }),
+    file: path.join(stoneDir, `${String(image.index).padStart(2, "0")}.${output.ext}`),
+    mime: output.mime,
+    ...fitInside(info.width, info.height, MAX_SIZE),
   };
 }
 
 /**
- * Writes the planned versions of an image and returns them, the master with
- * its SHA-256 checksum. Re-running overwrites the files.
+ * Writes the planned file of a photo and returns it with its SHA-256
+ * checksum. Re-running overwrites the file.
  */
-export async function writeVersions(sourceFile, info, versions) {
-  fs.mkdirSync(path.dirname(versions.master.file), { recursive: true });
+export async function writeVersion(sourceFile, version) {
+  fs.mkdirSync(path.dirname(version.file), { recursive: true });
   // rotate() applies the EXIF orientation; sharp writes no metadata unless asked
-  const base = () => sharp(sourceFile, { limitInputPixels: MAX_PIXELS }).rotate();
-  await MASTER[info.format].encode(base()).toFile(versions.master.file);
-  if (versions.display) {
-    await base()
-      .resize(DISPLAY_SIZE, DISPLAY_SIZE, { fit: "inside", withoutEnlargement: true })
-      .jpeg({ quality: displayQuality })
-      .toFile(versions.display.file);
-  }
-  const checksum = crypto
-    .createHash("sha256")
-    .update(fs.readFileSync(versions.master.file))
-    .digest("hex");
-  return { ...versions, master: { ...versions.master, checksum } };
+  const resized = sharp(sourceFile, { limitInputPixels: MAX_PIXELS })
+    .rotate()
+    .resize(MAX_SIZE, MAX_SIZE, { fit: "inside", withoutEnlargement: true });
+  const output = version.mime === "image/png" ? OUTPUT.png : OUTPUT.jpeg;
+  await output.encode(resized).toFile(version.file);
+  const checksum = crypto.createHash("sha256").update(fs.readFileSync(version.file)).digest("hex");
+  return { ...version, checksum };
 }

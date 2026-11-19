@@ -143,7 +143,7 @@ describe("images", () => {
 
   test("collectImages needs main_image; images is optional", () => {
     expect(collectImages({}, dir).problems).toEqual([
-      "main_image is required: the photo whose display version becomes `image`",
+      "main_image is required: the photo that becomes `image`",
     ]);
     expect(collectImages({ main_image: { file: "a.webp" } }, dir).problems).toEqual([]);
   });
@@ -175,39 +175,31 @@ describe("images", () => {
     ]);
   });
 
-  const versions = (n, main, checksum) => ({
-    master: { file: `/g/0${n}-master.jpg`, mime: "image/jpeg", ...(checksum && { checksum }) },
-    ...(main && { display: { file: `/g/0${n}-display.jpg`, mime: "image/jpeg" } }),
-  });
+  const version = (n, checksum) => ({ file: `/g/0${n}.png`, mime: "image/png", ...(checksum && { checksum }) });
   const photos = (checksum) => [
-    { main: true, description: "Front view", versions: versions(1, true, checksum) },
-    { main: false, description: "Side view", versions: versions(2, false, checksum) },
+    { main: true, description: "Front view", version: version(1, checksum) },
+    { main: false, description: "Side view", version: version(2, checksum) },
   ];
 
-  test("buildMetadata: image is the display version, files has one entry per master", () => {
+  test("buildMetadata: image is the main photo's file, files has only the other photos (#42)", () => {
     const cids = new Map([
-      ["/g/01-master.jpg", "QmMaster1"],
-      ["/g/01-display.jpg", "QmDisplay"],
-      ["/g/02-master.jpg", "QmMaster2"],
+      ["/g/01.png", "QmMain"],
+      ["/g/02.png", "QmSide"],
     ]);
     const built = buildMetadata(make(), photos("ab".repeat(32)), cids);
     expect(built.main_image).toBeUndefined();
     expect(built.images).toBeUndefined();
-    expect(built.image).toBe("ipfs://QmDisplay");
-    expect(built.type).toBe("image/jpeg");
+    expect(built.image).toBe("ipfs://QmMain");
+    expect(built.type).toBe("image/png");
     expect(built.files).toEqual([
-      { uri: "ipfs://QmMaster1", type: "image/jpeg", is_default_file: true, checksum: "ab".repeat(32), metadata: { description: "Front view" } },
-      { uri: "ipfs://QmMaster2", type: "image/jpeg", is_default_file: false, checksum: "ab".repeat(32), metadata: { description: "Side view" } },
+      { uri: "ipfs://QmSide", type: "image/png", checksum: "ab".repeat(32), metadata: { description: "Side view" } },
     ]);
   });
 
   test("buildMetadata uses placeholder URIs and no checksum before the files are written", () => {
     const built = buildMetadata(make(), photos());
     expect(built.image).toBe("ipfs://pending");
-    expect(built.files.map((f) => [f.uri, "checksum" in f])).toEqual([
-      ["ipfs://pending", false],
-      ["ipfs://pending", false],
-    ]);
+    expect(built.files.map((f) => [f.uri, "checksum" in f])).toEqual([["ipfs://pending", false]]);
   });
 
   test("buildMetadata keeps files already in the metadata and adds documents last", () => {

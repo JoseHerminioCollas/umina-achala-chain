@@ -4,9 +4,9 @@
  * piece of jewelry made of Umiña NFTs) on Hedera (NETWORK, required), in this
  * order, so the ledger never holds a record for an NFT that does not exist:
  *
- * 1. check the environment and the metadata, plan the image versions
+ * 1. check the environment and the metadata, plan the image files
  *    (prepare.js); --dry-run stops here
- * 1b. make the image versions in generated/<stone_id>/; --images-only stops here
+ * 1b. make the image files in generated/<stone_id>/; --images-only stops here
  * 2. read the provenance topic: refuse a stone_id already minted (--force
  *    skips this) and run the class's ledger checks (an Achala's stones)
  * 3. record COMPLIANCE in HCS; its transaction ID goes into the metadata
@@ -23,7 +23,7 @@
  */
 
 import { buildEvent, loadSubmitKey, submitEvent } from "../hcs.js";
-import { writeVersions } from "./images.js";
+import { writeVersion } from "./images.js";
 import { readProvenance } from "../provenance.js";
 import { buildMetadata, findMint, parseMintArgs } from "./lib.js";
 import { prepareMint } from "./prepare.js";
@@ -45,13 +45,13 @@ Usage: NETWORK=testnet node src/mint/mintNFT.js <metadata-file | --form post-fil
 
   <metadata-file>        a metadata JSON file to mint
   --form <post-file>     a mint form post; the metadata file is generated from it
-  --out <dir>            where the generated metadata and image versions go (default generated/)
+  --out <dir>            where the generated metadata and image files go (default generated/)
   --token umina|achala   the token class (default umina)
   --force                mint even if the stone_id already has a MINT
   --dry-run              check everything and list the files it would make; makes
-                         no image versions and sends nothing (--form still writes
+                         no image files and sends nothing (--form still writes
                          the generated metadata file)
-  --images-only          make the image versions and stop (no network)`;
+  --images-only          make the image files and stop (no network)`;
 
 // Exported so tests can wait for the run to finish (image work is real async work)
 export const done = runScript("Unexpected error during minting workflow", async (session) => {
@@ -65,7 +65,7 @@ export const done = runScript("Unexpected error during minting workflow", async 
   const { name: className, envVar: tokenVar } = TOKEN_CLASSES[tokenClass];
   const tokenId = process.env[tokenVar];
 
-  // --- 1. Check the environment and the metadata, plan the image versions ---
+  // --- 1. Check the environment and the metadata, plan the image files ---
   const prepared = await prepareMint(input, steps, process.env);
   const { metadata, images, documents } = prepared;
   if (prepared.generatedFile) console.log(`✅ Metadata file generated from ${formFile}: ${prepared.generatedFile}`);
@@ -75,18 +75,18 @@ export const done = runScript("Unexpected error during minting workflow", async 
 
   const describeVersion = (v) => `${v.file} (${v.mime}, ${v.width}×${v.height})`;
   if (dryRun) {
-    images.forEach((image) => Object.values(image.versions).forEach((v) => console.log(`Would make ${describeVersion(v)}`)));
+    images.forEach((image) => console.log(`Would make ${describeVersion(image.version)}`));
     documents.forEach((d) => console.log(`Would pin ${d.file} (${d.mime})`));
     console.log("Dry run, nothing sent.");
     return;
   }
 
-  // --- 1b. Make the image versions (master for every photo, display for the main one) ---
+  // --- 1b. Make one file per photo (#42): PNG with transparency, else JPEG ---
   for (const image of images) {
-    image.versions = await writeVersions(image.file, image.info, image.versions);
-    Object.values(image.versions).forEach((v) => console.log(`✅ Made ${describeVersion(v)}`));
+    image.version = await writeVersion(image.file, image.version);
+    console.log(`✅ Made ${describeVersion(image.version)}`);
   }
-  const assets = [...images.flatMap((image) => Object.values(image.versions)), ...documents];
+  const assets = [...images.map((image) => image.version), ...documents];
 
   if (imagesOnly) {
     assets.forEach((a) => console.log(`Would pin ${a.file} (${a.mime})`));

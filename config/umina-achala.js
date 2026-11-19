@@ -47,10 +47,11 @@ export default {
   },
 
   /**
-   * Uploaded photos and the versions pinned from them (#7). Masters keep the
-   * upload's size and format (JPEG and WebP at masterQuality, PNG lossless);
-   * the main photo also gets a display version, displaySize px on the long
-   * side, JPEG at displayQuality.
+   * Uploaded photos and the one file pinned for each (#7, #42): at most
+   * maxSize px on the long side, never enlarged. A photo with transparency
+   * becomes a PNG with a reduced palette (pngQuality, 0-100; slightly lossy,
+   * the transparency kept, so a wallet shows it on its own theme); one
+   * without becomes a JPEG at jpegQuality.
    *
    * maxOtherImages: photos besides main_image, 20 (#35). More than a stone
    * needs, but metadata is immutable, so a photo left out at the mint can
@@ -61,8 +62,8 @@ export default {
     maxFileBytes: 25 * 1024 * 1024,
     maxPixels: 100_000_000,
     maxOtherImages: 20,
-    displaySize: 1080,
-    masterQuality: 95,
-    displayQuality: 82,
+    maxSize: 1600,
+    pngQuality: 90,
+    jpegQuality: 82,
   },
 };

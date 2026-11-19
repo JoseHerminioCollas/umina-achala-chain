@@ -172,8 +172,8 @@ export function collectDocuments(metadata, baseDir) {
 
 /**
  * Reads the input-only photo fields from the metadata (umina-achala-chain#7):
- * `main_image` (required; its display version becomes `image` and its master
- * is the default file) and `images` (optional, at most MAX_OTHER_IMAGES more). Each has a
+ * `main_image` (required; its file becomes `image`, #42) and `images`
+ * (optional, at most MAX_OTHER_IMAGES more; each goes in `files[]`). Each has a
  * `file` (relative to the metadata file) and an optional `description`.
  * Returns the photos in order, the main one first with index 1, with
  * absolute paths, plus any problems.
@@ -210,7 +210,7 @@ export function collectImages(metadata, baseDir) {
     });
   };
   if (!metadata.main_image) {
-    problems.push("main_image is required: the photo whose display version becomes `image`");
+    problems.push("main_image is required: the photo that becomes `image`");
   } else {
     add(metadata.main_image, "main_image", true);
   }
@@ -245,30 +245,29 @@ export function testnetFolderProblem(images, testnetDir) {
 /**
  * Builds the HIP-412 metadata that gets pinned (umina-achala-chain#7): drops
  * the input-only `main_image`, `images` and `documents`; sets `image` and
- * `type` from the main image's display version; adds one `files[]` entry per
- * photo master (the main image's is the default file; each has its SHA-256
+ * `type` from the main photo's file, which is not repeated in `files[]`
+ * (#42); adds one `files[]` entry per other photo (with its SHA-256
  * `checksum` once written) and then one per document. Files with no CID yet
  * get a placeholder ipfs:// URI, so the schema can be checked before anything
  * is pinned.
  * @param {object} metadata
- * @param {Array<{ main: boolean, description: string, versions: object }>} images
- *   from collectImages, with `versions` from planVersions or writeVersions
+ * @param {Array<{ main: boolean, description: string, version: object }>} images
+ *   from collectImages, with `version` from planVersion or writeVersion
  */
 export function buildMetadata(metadata, images, cidsByFile = new Map(), documents = []) {
   const { main_image: _main, images: _images, documents: _documents, ...rest } =
     structuredClone(metadata);
   const uri = (item) => `ipfs://${cidsByFile.get(item.file) ?? "pending"}`;
-  const master = (img) => ({
-    uri: uri(img.versions.master),
-    type: img.versions.master.mime,
-    is_default_file: img.main,
-    ...(img.versions.master.checksum && { checksum: img.versions.master.checksum }),
+  const photo = (img) => ({
+    uri: uri(img.version),
+    type: img.version.mime,
+    ...(img.version.checksum && { checksum: img.version.checksum }),
     metadata: { description: img.description },
   });
   const document = (doc) => ({ uri: uri(doc), type: doc.mime, metadata: { description: doc.description } });
   const built = {
     ...rest,
-    files: [...(rest.files ?? []), ...images.map(master), ...documents.map(document)],
+    files: [...(rest.files ?? []), ...images.filter((img) => !img.main).map(photo), ...documents.map(document)],
   };
   // A certificate's report is one of the documents: link it by its URI (#38)
   if (Array.isArray(built.properties?.certifications)) {
@@ -280,8 +279,8 @@ export function buildMetadata(metadata, images, cidsByFile = new Map(), document
   }
   const main = images.find((img) => img.main);
   if (main) {
-    built.image = uri(main.versions.display);
-    built.type = main.versions.display.mime;
+    built.image = uri(main.version);
+    built.type = main.version.mime;
   }
   return built;
 }
