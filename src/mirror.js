@@ -124,6 +124,26 @@ export async function topicEvents(topicId, fetchFn = fetch) {
 }
 
 /**
+ * Every NFT of a token, burned ones included (deleted), in serial order,
+ * following the mirror node's pages. Each has serial_number, account_id (the
+ * holder), deleted and metadata (base64 of the ipfs:// URI) (#44).
+ * @param {string} tokenId
+ * @param {typeof fetch} [fetchFn]
+ * @returns {Promise<Array<{ serial_number: number, account_id: string | null, deleted: boolean, metadata: string }>>}
+ */
+export async function tokenNfts(tokenId, fetchFn = fetch) {
+  const nfts = [];
+  let next = `/api/v1/tokens/${tokenId}/nfts?limit=100&order=asc`;
+  while (next) {
+    const page = await getJson(next, fetchFn);
+    if (!page) throw new Error(`token ${tokenId} was not found on the mirror node`);
+    nfts.push(...(page.nfts ?? []));
+    next = page.links?.next ?? null;
+  }
+  return nfts;
+}
+
+/**
  * Every NFT of a token that an account holds now (not burned), following the
  * mirror node's pages.
  * @param {string} accountId

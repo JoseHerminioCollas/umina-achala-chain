@@ -58,6 +58,14 @@ export default {
    * never be added to the NFT (only to HCS, #36). No total size per stone:
    * only UA uploads, and each photo is limited to maxFileBytes.
    */
+  /**
+   * The IPFS gateway the catalog builder reads metadata through
+   * (umina-achala-chain#44): Pinata's public gateway, which serves UA's pinned
+   * files (ipfs.io refused with 429 on 2026-11-19). IPFS_GATEWAY in the env
+   * file overrides it, e.g. for a dedicated gateway.
+   */
+  ipfsGateway: "https://gateway.pinata.cloud/ipfs/",
+
   images: {
     maxFileBytes: 25 * 1024 * 1024,
     maxPixels: 100_000_000,

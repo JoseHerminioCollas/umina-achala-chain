@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Umiña Achala site catalog",
+  "description": "catalog.json, written by src/catalog/buildCatalog.js (umina-achala-chain#44) from the chain and IPFS, and read by the site (umina-achala-web#89, #124). It is a cache: never edited by hand, rebuilt at any time. It holds only what UA has for sale. The metadata of each item is its HIP-412 file as pinned, checked at build time against hip412-umina-schema.json or hip412-achala-schema.json. Copy this file to umina-achala-web when it changes.",
+  "type": "object",
+  "required": ["schema_version", "network", "built_at", "source", "items"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "const": 1 },
+    "network": { "enum": ["testnet", "mainnet"] },
+    "built_at": { "type": "string", "format": "date-time" },
+    "source": {
+      "description": "Where the catalog was read from, and how far each topic was read (the last sequence number, 0 when empty).",
+      "type": "object",
+      "required": ["mirror", "ipfs_gateway", "umina_token_id", "achala_token_id", "provenance_topic", "display_topic", "treasury_id", "provenance_seq", "display_seq"],
+      "additionalProperties": false,
+      "properties": {
+        "mirror": { "type": "string", "format": "uri" },
+        "ipfs_gateway": { "type": "string", "format": "uri" },
+        "umina_token_id": { "$ref": "#/$defs/hederaId" },
+        "achala_token_id": { "$ref": "#/$defs/hederaId" },
+        "provenance_topic": { "$ref": "#/$defs/hederaId" },
+        "display_topic": { "$ref": "#/$defs/hederaId" },
+        "treasury_id": { "$ref": "#/$defs/hederaId" },
+        "provenance_seq": { "type": "integer", "minimum": 0 },
+        "display_seq": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "items": {
+      "description": "What UA has for sale, sorted by kind (umina, then achala) and serial.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/item" }
+    }
+  },
+  "$defs": {
+    "hederaId": { "type": "string", "pattern": "^0\\.0\\.\\d+$" },
+    "cid": { "type": "string", "pattern": "^[A-Za-z0-9]+$" },
+    "event": {
+      "description": "A provenance event about the NFT, as on the topic.",
+      "type": "object",
+      "required": ["seq", "consensus_timestamp", "event"],
+      "additionalProperties": false,
+      "properties": {
+        "seq": { "type": "integer", "minimum": 1 },
+        "consensus_timestamp": { "type": ["string", "null"], "pattern": "^\\d+\\.\\d+$" },
+        "event": { "type": "object", "required": ["event"] }
+      }
+    },
+    "nft": {
+      "type": "object",
+      "required": ["stone_id", "token_id", "serial", "metadata_cid", "metadata", "events"],
+      "properties": {
+        "stone_id": { "type": "string", "pattern": "^(UMINA|ACHALA)-\\d{4}-[A-Z]{2}-\\d{2}$" },
+        "token_id": { "$ref": "#/$defs/hederaId" },
+        "serial": { "type": "integer", "minimum": 1 },
+        "metadata_cid": { "$ref": "#/$defs/cid" },
+        "metadata": { "type": "object" },
+        "events": { "type": "array", "items": { "$ref": "#/$defs/event" } }
+      }
+    },
+    "stone": {
+      "description": "An Umiña mounted in an Achala: sold with it, never listed alone.",
+      "type": "object",
+      "allOf": [{ "$ref": "#/$defs/nft" }],
+      "unevaluatedProperties": false
+    },
+    "item": {
+      "type": "object",
+      "allOf": [{ "$ref": "#/$defs/nft" }],
+      "required": ["kind", "price"],
+      "properties": {
+        "kind": { "enum": ["umina", "achala"] },
+        "price": {
+          "description": "The asking price from the item's latest LISTED on the display topic.",
+          "type": "object",
+          "required": ["amount", "currency", "listed_seq", "listed_at"],
+          "additionalProperties": false,
+          "properties": {
+            "amount": { "type": "string", "pattern": "^\\d+(\\.\\d{1,8})?$" },
+            "currency": { "const": "HBAR" },
+            "listed_seq": { "type": "integer", "minimum": 1 },
+            "listed_at": { "type": "string", "pattern": "^\\d+\\.\\d+$" }
+          }
+        },
+        "stones": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/stone" } }
+      },
+      "if": { "type": "object", "properties": { "kind": { "const": "achala" } } },
+      "then": { "type": "object", "required": ["stones"] },
+      "else": { "not": { "type": "object", "required": ["stones"] } },
+      "unevaluatedProperties": false
+    }
+  }
+}
