@@ -3,7 +3,7 @@
  * @description Reading the provenance topic, shared by the scripts that check
  * an item against it before acting (umina-achala-chain#29): the read with one
  * error message, and the mounted-stone check with the token IDs from the
- * environment (#24).
+ * environment (#24). The display topic is read the same way (#43).
  */
 
 import { topicEvents } from "./mirror.js";
@@ -20,6 +20,20 @@ export async function readProvenance(env, read = topicEvents) {
     return { events: await read(env.HCS_TOPIC_ID) };
   } catch (err) {
     return { problem: `cannot read HCS_TOPIC_ID ${env.HCS_TOPIC_ID}: ${err.message}` };
+  }
+}
+
+/**
+ * Reads every event on the display topic (HCS_DISPLAY_TOPIC_ID): LISTED and
+ * UNLISTED (umina-achala-chain#10, #43).
+ * @param {Record<string, string | undefined>} env
+ * @returns {Promise<{ events: object[], problem?: undefined } | { problem: string, events?: undefined }>}
+ */
+export async function readDisplay(env, read = topicEvents) {
+  try {
+    return { events: await read(env.HCS_DISPLAY_TOPIC_ID) };
+  } catch (err) {
+    return { problem: `cannot read HCS_DISPLAY_TOPIC_ID ${env.HCS_DISPLAY_TOPIC_ID}: ${err.message}` };
   }
 }
 

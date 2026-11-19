@@ -1,5 +1,5 @@
 import { jest } from "@jest/globals";
-import { mountedStoneProblem, mountIds, readProvenance } from "../src/provenance.js";
+import { mountedStoneProblem, mountIds, readDisplay, readProvenance } from "../src/provenance.js";
 
 describe("provenance helpers (umina-achala-chain#29)", () => {
   const env = { HCS_TOPIC_ID: "0.0.3003", UMINA_TOKEN_ID: "0.0.2002", ACHALA_TOKEN_ID: "0.0.2003" };
@@ -16,6 +16,18 @@ describe("provenance helpers (umina-achala-chain#29)", () => {
     };
     expect(await readProvenance(env, read)).toEqual({
       problem: "cannot read HCS_TOPIC_ID 0.0.3003: HCS topic 0.0.3003 was not found on the mirror node",
+    });
+  });
+
+  test("readDisplay reads HCS_DISPLAY_TOPIC_ID the same way (#43)", async () => {
+    const read = jest.fn(async () => [{ event: "LISTED" }]);
+    expect(await readDisplay({ HCS_DISPLAY_TOPIC_ID: "0.0.3004" }, read)).toEqual({ events: [{ event: "LISTED" }] });
+    expect(read).toHaveBeenCalledWith("0.0.3004");
+    const failing = async () => {
+      throw new Error("not found");
+    };
+    expect(await readDisplay({ HCS_DISPLAY_TOPIC_ID: "0.0.3004" }, failing)).toEqual({
+      problem: "cannot read HCS_DISPLAY_TOPIC_ID 0.0.3004: not found",
     });
   });
 

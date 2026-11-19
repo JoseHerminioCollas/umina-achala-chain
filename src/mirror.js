@@ -82,12 +82,13 @@ export async function topicInfo(topicId, fetchFn = fetch) {
 
 /**
  * Reads every message on an HCS topic, oldest first, and returns the ones
- * that are JSON objects (events), each with its sequence number. Messages
+ * that are JSON objects (events), each with its sequence number and, when the
+ * mirror node gives it, its consensus timestamp. Messages
  * that are not JSON are skipped. Throws when the topic does not exist or is
  * deleted.
  * @param {string} topicId
  * @param {typeof fetch} [fetchFn]
- * @returns {Promise<Array<{ sequence_number: number, event: object }>>}
+ * @returns {Promise<Array<{ sequence_number: number, consensus_timestamp?: string, event: object }>>}
  */
 export async function topicEvents(topicId, fetchFn = fetch) {
   // The messages endpoint answers 200 with no messages for a topic that does
@@ -107,10 +108,12 @@ export async function topicEvents(topicId, fetchFn = fetch) {
       throw new Error(`mirror node request failed: ${response.status} ${await response.text()}`);
     }
     const page = await response.json();
-    for (const { sequence_number, message } of page.messages ?? []) {
+    for (const { sequence_number, consensus_timestamp, message } of page.messages ?? []) {
       try {
         const event = JSON.parse(Buffer.from(message, "base64").toString("utf8"));
-        if (event && typeof event === "object") events.push({ sequence_number, event });
+        if (event && typeof event === "object") {
+          events.push({ sequence_number, ...(consensus_timestamp && { consensus_timestamp }), event });
+        }
       } catch {
         // not an event
       }
@@ -118,4 +121,47 @@ export async function topicEvents(topicId, fetchFn = fetch) {
     next = page.links?.next ?? null;
   }
   return events;
+}
+
+/**
+ * Every NFT of a token that an account holds now (not burned), following the
+ * mirror node's pages.
+ * @param {string} accountId
+ * @param {string} tokenId
+ * @param {typeof fetch} [fetchFn]
+ * @returns {Promise<Array<{ serial_number: number, account_id: string, deleted: boolean }>>}
+ */
+export async function accountNfts(accountId, tokenId, fetchFn = fetch) {
+  const nfts = [];
+  let next = `/api/v1/accounts/${accountId}/nfts?token.id=${tokenId}&limit=100`;
+  while (next) {
+    const page = await getJson(next, fetchFn);
+    if (!page) throw new Error(`account ${accountId} was not found on the mirror node`);
+    nfts.push(...(page.nfts ?? []).filter((nft) => !nft.deleted));
+    next = page.links?.next ?? null;
+  }
+  return nfts;
+}
+
+/**
+ * The consensus timestamp of the latest transaction that moved an NFT into
+ * an account (its mint, for the treasury, or a transfer), or null when the
+ * mirror node shows none. Used to tell a listing made before the NFT left and
+ * came back from one made since (umina-achala-chain#43).
+ * @param {string} tokenId
+ * @param {string|number} serial
+ * @param {string} accountId
+ * @param {typeof fetch} [fetchFn]
+ * @returns {Promise<string | null>} e.g. "1700000000.123456789"
+ */
+export async function latestArrival(tokenId, serial, accountId, fetchFn = fetch) {
+  let next = `/api/v1/tokens/${tokenId}/nfts/${serial}/transactions?limit=25&order=desc`;
+  while (next) {
+    const page = await getJson(next, fetchFn);
+    if (!page) return null;
+    const arrival = (page.transactions ?? []).find((t) => t.receiver_account_id === accountId);
+    if (arrival) return arrival.consensus_timestamp;
+    next = page.links?.next ?? null;
+  }
+  return null;
 }
