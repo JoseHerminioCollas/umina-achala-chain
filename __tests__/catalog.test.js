@@ -13,7 +13,7 @@ import {
   metadataCache,
   sortNfts,
 } from "../src/catalog/lib.js";
-import { cidOfNftMetadata, cidOfUri, fetchIpfsJson, ipfsGateway, NotJsonError } from "../src/ipfs.js";
+import { cidOfNftMetadata, cidOfUri, fetchIpfsBytes, fetchIpfsJson, ipfsGateway, ipfsPathOfUri, NotJsonError } from "../src/ipfs.js";
 import { tokenNfts } from "../src/mirror.js";
 
 // The catalog builder's rules (umina-achala-chain#44), the gateway reader and
@@ -219,7 +219,7 @@ describe("the catalog document", () => {
 
   test("keys in a fixed order", () => {
     const catalog = doc();
-    expect(Object.keys(catalog)).toEqual(["schema_version", "network", "built_at", "source", "items"]);
+    expect(Object.keys(catalog)).toEqual(["schema_version", "network", "built_at", "source", "items", "media"]);
     expect(Object.keys(catalog.items[2])).toEqual([
       "kind", "stone_id", "token_id", "serial", "metadata_cid", "metadata", "events", "price", "stones",
     ]);
@@ -296,6 +296,25 @@ describe("ipfs.js", () => {
       "cannot read https://g/QmA after 2 tries: HTTP 503",
     );
     expect(fetchFn).toHaveBeenCalledTimes(2);
+  });
+
+  test("IPFS paths: a CID or <cid>/<file>, safe as a folder name", () => {
+    expect(ipfsPathOfUri("ipfs://QmAbc")).toBe("QmAbc");
+    expect(ipfsPathOfUri("ipfs://QmAbc/photo_1.png")).toBe("QmAbc/photo_1.png");
+    expect(ipfsPathOfUri("ipfs://QmAbc/../x")).toBeNull();
+    expect(ipfsPathOfUri("ipfs://QmAbc/a b.png")).toBeNull();
+    expect(ipfsPathOfUri("https://x/QmAbc")).toBeNull();
+  });
+
+  test("reads a file as bytes, with the same retries", async () => {
+    const bytes = Buffer.from([1, 2, 3]);
+    const fetchFn = jest
+      .fn()
+      .mockResolvedValueOnce({ ok: false, status: 429 })
+      .mockResolvedValueOnce({ ok: true, status: 200, arrayBuffer: async () => bytes });
+    await expect(fetchIpfsBytes("QmA/p.png", { gateway: "https://g/", fetchFn, sleep, waitMs: 10 })).resolves.toEqual(bytes);
+    expect(fetchFn.mock.calls.map((c) => c[0])).toEqual(["https://g/QmA/p.png", "https://g/QmA/p.png"]);
+    expect(sleep.mock.calls).toEqual([[10]]);
   });
 
   test("a file that is not JSON throws NotJsonError at once", async () => {

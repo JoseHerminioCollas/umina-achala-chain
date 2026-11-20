@@ -196,12 +196,15 @@ export function lastSeq(events) {
 
 /**
  * The whole catalog, items sorted by kind (umina, then achala) and serial,
- * keys in a fixed order: two builds with no change on the chain differ only
- * in built_at.
+ * media by URI, keys in a fixed order: two builds with no change on the chain
+ * differ only in built_at.
+ * @param {{ network: string, builtAt: string, source: object, items: object[], media?: object }} input
+ *   media: each photo's ipfs:// URI → its copies' paths (umina-achala-chain#45)
  */
-export function catalogDocument({ network, builtAt, source, items }) {
+export function catalogDocument({ network, builtAt, source, items, media = {} }) {
   const sorted = [...items].sort((a, b) => KINDS.indexOf(a.kind) - KINDS.indexOf(b.kind) || a.serial - b.serial);
-  return { schema_version: CATALOG_SCHEMA_VERSION, network, built_at: builtAt, source, items: sorted };
+  const mediaSorted = Object.fromEntries(Object.entries(media).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
+  return { schema_version: CATALOG_SCHEMA_VERSION, network, built_at: builtAt, source, items: sorted, media: mediaSorted };
 }
 
 /** The problems with a catalog against schema/catalog-schema.json; empty when valid. */

@@ -19,9 +19,15 @@
  * the old catalog stays. An item whose metadata is not valid is left out,
  * with a warning.
  *
+ * Each photo (an NFT's image and its image files) gets a thumbnail and a
+ * display copy under <out-dir>/media/ (umina-achala-chain#45; catalog/media.js),
+ * read through the gateway once: a copy already on disk is not read again.
+ * A photo that cannot be read is left without a copy, with a warning; the
+ * site then loads it through the gateway.
+ *
  * The file is written to catalog.json.tmp, then renamed, so a build that
  * fails half way never leaves a broken catalog. --dry-run prints what would
- * be in it and writes nothing.
+ * be in it and writes nothing (no photo is read).
  */
 
 import { mkdir, readFile, rename, writeFile } from "fs/promises";
@@ -32,6 +38,7 @@ import { mirrorNode, networkName } from "../network.js";
 import { readDisplay, readProvenance } from "../provenance.js";
 import { mintOfSerial } from "../mint/achala.js";
 import { validateMetadata } from "../mint/metadataValidator.js";
+import { ensureMedia, photoUris } from "./media.js";
 import {
   CATALOG_FILE,
   KINDS,
@@ -57,8 +64,9 @@ nothing is sent to Hedera.
 Usage:
   NETWORK=testnet node src/catalog/buildCatalog.js <out-dir> [--dry-run]
 
-  <out-dir>    where catalog.json is written, e.g. ../umina-achala-web/frontend/public/data
-  IPFS_GATEWAY the gateway to read metadata through (optional, in the env file)`;
+  <out-dir>    where catalog.json and media/ (the photo copies) are written,
+               e.g. ../umina-achala-web/frontend/public/data
+  IPFS_GATEWAY the gateway to read metadata and photos through (optional, in the env file)`;
 
 const args = parseScriptArgs({ "dry-run": { type: "boolean" } }, 1);
 loadEnv();
@@ -193,7 +201,21 @@ runScript("Catalog build failed", async () => {
     items.push(catalogItem({ stone_id: stoneId, token_id: tokenId, serial, cid, metadata: loaded.metadata, events }, { kind, price, stones }));
   }
 
-  // --- 5. The catalog, checked against its schema ---
+  // --- 5. Photos: a thumbnail and a display copy of each, once (#45) ---
+  const dryRun = args.values["dry-run"];
+  const media = {};
+  const photos = { read: 0, onDisk: 0 };
+  for (const uri of photoUris(items)) {
+    try {
+      const { paths, read } = await ensureMedia(outDir, uri, { dryRun });
+      media[uri] = paths;
+      photos[read ? "read" : "onDisk"]++;
+    } catch (err) {
+      warnings.push(`photo ${uri} has no copy (the site loads it through the gateway): ${err.message}`);
+    }
+  }
+
+  // --- 6. The catalog, checked against its schema ---
   const catalog = catalogDocument({
     network,
     builtAt: isoSeconds(new Date()),
@@ -209,11 +231,12 @@ runScript("Catalog build failed", async () => {
       display_seq: lastSeq(display.events),
     },
     items,
+    media,
   });
   const invalid = catalogProblems(catalog);
   if (invalid.length) return fail(invalid, "The catalog does not match schema/catalog-schema.json (nothing written)");
 
-  // --- 6. Print it ---
+  // --- 7. Print it ---
   if (catalog.items.length) {
     console.log("For sale:");
     console.table(
@@ -237,10 +260,15 @@ runScript("Catalog build failed", async () => {
   }
   warnings.forEach((w) => console.log(`⚠️  ${w}`));
   console.log(`Metadata: ${counts.fetched} read through the gateway, ${counts.cached} from the previous catalog.`);
+  console.log(
+    dryRun
+      ? `Photos: ${photos.read} would be read through the gateway, ${photos.onDisk} already in ${outDir}/media.`
+      : `Photos: ${photos.read} read through the gateway and copied, ${photos.onDisk} already in ${outDir}/media.`,
+  );
 
-  // --- 7. Write it: a temp file, then rename ---
+  // --- 8. Write it: a temp file, then rename ---
   const json = `${JSON.stringify(catalog, null, 2)}\n`;
-  if (args.values["dry-run"]) {
+  if (dryRun) {
     console.log(`Dry run: would write ${catalog.items.length} items (${json.length} bytes) to ${path}. Nothing written.`);
     return;
   }

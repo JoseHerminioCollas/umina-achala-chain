@@ -74,4 +74,16 @@ export default {
     pngQuality: 90,
     jpegQuality: 82,
   },
+
+  /**
+   * The site's copies of each photo, made by the catalog builder
+   * (umina-achala-chain#45) under <out-dir>/media/<cid>/: a thumbnail for the
+   * cards and a display copy for the detail view, both WebP (transparency
+   * kept), fitted inside a square of this many pixels, never enlarged.
+   */
+  catalogMedia: {
+    thumbSize: 400,
+    displaySize: 1080,
+    webpQuality: 80,
+  },
 };

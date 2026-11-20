@@ -30,6 +30,20 @@
       "description": "What UA has for sale, sorted by kind (umina, then achala) and serial.",
       "type": "array",
       "items": { "$ref": "#/$defs/item" }
+    },
+    "media": {
+      "description": "The site's copies of each photo (umina-achala-chain#45): an item's image or image file, by its ipfs:// URI, to a thumbnail for the cards and a display copy for the detail view, WebP, relative to catalog.json. A photo with no entry is loaded through the gateway.",
+      "type": "object",
+      "propertyNames": { "pattern": "^ipfs://" },
+      "additionalProperties": {
+        "type": "object",
+        "required": ["thumb", "display"],
+        "additionalProperties": false,
+        "properties": {
+          "thumb": { "type": "string", "pattern": "^media/[A-Za-z0-9._/-]+\\.webp$" },
+          "display": { "type": "string", "pattern": "^media/[A-Za-z0-9._/-]+\\.webp$" }
+        }
+      }
     }
   },
   "$defs": {

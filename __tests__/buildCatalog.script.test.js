@@ -2,6 +2,7 @@ import { jest } from "@jest/globals";
 import fs from "fs";
 import os from "os";
 import path from "path";
+import sharp from "sharp";
 import { withPlaceholderAssets } from "../src/mint/lib.js";
 import { actualSdk } from "../testHelpers/actualSdk.js";
 
@@ -18,9 +19,12 @@ const BUYER = "0.0.6006";
 const MIRROR = "https://testnet.mirrornode.hedera.com";
 const GATEWAY = "https://gateway.pinata.cloud/ipfs/";
 
+// each NFT's main photo: ipfs://QmPhoto<stone_id without dashes>
+const photoCid = (stoneId) => `QmPhoto${stoneId.replace(/-/g, "")}`;
 const uminaMetadata = (stoneId) => {
   const m = withPlaceholderAssets(JSON.parse(fs.readFileSync("json/umina-example.json", "utf8")));
   m.properties.stone_id = stoneId;
+  m.image = `ipfs://${photoCid(stoneId)}`;
   return m;
 };
 const achalaMetadata = () => {
@@ -28,6 +32,7 @@ const achalaMetadata = () => {
   m.properties.stone_id = "ACHALA-2026-PE-02";
   m.properties.stones = [{ serial: 8, stone_id: "UMINA-2026-AU-01" }];
   m.properties.umina_token_id = UMINA;
+  m.image = `ipfs://${photoCid("ACHALA-2026-PE-02")}`;
   return m;
 };
 
@@ -54,7 +59,20 @@ const defaultNfts = () => ({
   [UMINA]: [nft(7), nft(8), nft(9)],
   [ACHALA]: [{ ...nft(1), metadata: Buffer.from("ipfs://QmAchala1").toString("base64") }],
 });
+// a 2000 × 1200 photo with transparency, as the gateway serves it
+let PHOTO;
+beforeAll(async () => {
+  PHOTO = await sharp({
+    create: { width: 2000, height: 1200, channels: 4, background: { r: 200, g: 120, b: 40, alpha: 0.5 } },
+  }).png().toBuffer();
+});
+const photoFiles = () =>
+  Object.fromEntries(
+    ["UMINA-2026-AG-01", "UMINA-2026-AU-01", "UMINA-2026-OP-01", "ACHALA-2026-PE-02"].map((id) => [photoCid(id), PHOTO]),
+  );
+
 const defaultFiles = () => ({
+  ...photoFiles(),
   Qm7x: uminaMetadata("UMINA-2026-AG-01"),
   Qm8x: uminaMetadata("UMINA-2026-AU-01"),
   Qm9x: uminaMetadata("UMINA-2026-OP-01"),
@@ -78,6 +96,7 @@ function mockDependencies({ display = defaultDisplay, nfts = defaultNfts(), arri
     status,
     json: async () => body,
     text: async () => (typeof body === "string" ? body : JSON.stringify(body)),
+    arrayBuffer: async () => (Buffer.isBuffer(body) ? body : Buffer.from(String(body))),
   });
   global.fetch = jest.fn(async (url) => {
     calls.urls.push(url);
@@ -86,7 +105,8 @@ function mockDependencies({ display = defaultDisplay, nfts = defaultNfts(), arri
       calls.gateway.push(cid);
       const file = files[cid];
       if (typeof file === "number") return reply(file, "");
-      return file === undefined ? reply(404, "") : reply(200, typeof file === "string" ? file : JSON.stringify(file));
+      if (file === undefined) return reply(404, "");
+      return reply(200, typeof file === "string" || Buffer.isBuffer(file) ? file : JSON.stringify(file));
     }
     const p = url.replace(MIRROR, "");
     let m;
@@ -203,6 +223,7 @@ describe("buildCatalog.js", () => {
     await run(dir);
     expect(calls.gateway).toEqual([]);
     expect(logs()).toMatch("Metadata: 0 read through the gateway, 3 from the previous catalog.");
+    expect(logs()).toMatch(`Photos: 0 read through the gateway and copied, 3 already in ${dir}/media.`);
     const second = JSON.parse(fs.readFileSync(file, "utf8"));
     expect({ ...second, built_at: "" }).toEqual({ ...first, built_at: "" });
   });
@@ -213,6 +234,8 @@ describe("buildCatalog.js", () => {
     expect(logs()).toMatch(/Dry run: would write 2 items/);
     expect(tables()[0].map((r) => r.stone_id)).toEqual(["UMINA-2026-AG-01", "ACHALA-2026-PE-02"]);
     expect(fs.existsSync(file)).toBe(false);
+    expect(logs()).toMatch(`Photos: 3 would be read through the gateway, 0 already in ${dir}/media.`);
+    expect(fs.existsSync(path.join(dir, "media"))).toBe(false);
   });
 
   test("a gateway failure stops the build and leaves the old catalog", async () => {
@@ -254,6 +277,38 @@ describe("buildCatalog.js", () => {
     await run(dir);
     expect(logs()).toMatch(`ACHALA-2026-PE-02 (${ACHALA}/1) is left out: its stone UMINA-2026-AU-01 (serial 8) is held by ${BUYER}`);
     expect(JSON.parse(fs.readFileSync(file, "utf8")).items.map((i) => i.kind)).toEqual(["umina"]);
+  });
+
+  test("copies each photo once: a thumbnail and a display copy, WebP, fitted, transparency kept (#45)", async () => {
+    mockDependencies();
+    await run(dir);
+    const catalog = JSON.parse(fs.readFileSync(file, "utf8"));
+    // the agate, the pendant and its gold stone; the unlisted opal has none
+    const uris = ["UMINA-2026-AG-01", "UMINA-2026-AU-01", "ACHALA-2026-PE-02"].map((id) => `ipfs://${photoCid(id)}`).sort();
+    expect(Object.keys(catalog.media)).toEqual(uris);
+    const agate = catalog.media[`ipfs://${photoCid("UMINA-2026-AG-01")}`];
+    expect(agate).toEqual({
+      thumb: `media/${photoCid("UMINA-2026-AG-01")}/thumb.webp`,
+      display: `media/${photoCid("UMINA-2026-AG-01")}/display.webp`,
+    });
+    const thumb = await sharp(path.join(dir, agate.thumb)).metadata();
+    const display = await sharp(path.join(dir, agate.display)).metadata();
+    expect([thumb.format, thumb.width, thumb.height, thumb.hasAlpha]).toEqual(["webp", 400, 240, true]);
+    expect([display.format, display.width, display.height, display.hasAlpha]).toEqual(["webp", 1080, 648, true]);
+    expect(calls.gateway.filter((c) => c.startsWith("QmPhoto"))).toHaveLength(3);
+    expect(fs.readdirSync(path.join(dir, "media", photoCid("UMINA-2026-AG-01")))).toEqual(["display.webp", "thumb.webp"]);
+  });
+
+  test("a photo that cannot be read gets no copy, with a warning; the build goes on", async () => {
+    jest.spyOn(global, "setTimeout").mockImplementation((fn) => (fn(), 0));
+    mockDependencies({ files: { ...defaultFiles(), [photoCid("UMINA-2026-AG-01")]: 503 } });
+    await run(dir);
+    expect(process.exitCode).toBeUndefined();
+    expect(logs()).toMatch(/⚠️ {2}photo ipfs:\/\/QmPhotoUMINA2026AG01 has no copy \(the site loads it through the gateway\): .*HTTP 503/);
+    const catalog = JSON.parse(fs.readFileSync(file, "utf8"));
+    expect(catalog.items).toHaveLength(2);
+    expect(catalog.media[`ipfs://${photoCid("UMINA-2026-AG-01")}`]).toBeUndefined();
+    expect(Object.keys(catalog.media)).toHaveLength(2);
   });
 
   test("IPFS_GATEWAY changes the gateway", async () => {
