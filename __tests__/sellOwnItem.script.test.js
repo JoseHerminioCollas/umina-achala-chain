@@ -84,6 +84,7 @@ const baseEnv = () => ({
   TREASURY_ID: "0.0.1001",
   UMINA_TOKEN_ID: "0.0.2002",
   HCS_TOPIC_ID: "0.0.3003",
+  HCS_DISPLAY_TOPIC_ID: "0.0.3004",
   BUYER_ID: "0.0.6006",
   BUYER_KEY: buyerKey.toStringDer(),
 });
@@ -159,7 +160,19 @@ describe("sellOwnItem.js", () => {
     mockDependencies();
     await runScript("7", "100");
 
-    expect(calls.steps.map((s) => s.name)).toEqual(["sale", "hcs"]);
+    // the sale, then SALE on the provenance topic and UNLISTED (sold) on the display topic
+    expect(calls.steps.map((s) => s.name)).toEqual(["sale", "hcs", "hcs"]);
+    const [saleMsg, unlistedMsg] = calls.steps.slice(1).map((s) => [
+      String(s.calls.find((c) => c[0] === "setTopicId")[1]),
+      JSON.parse(s.calls.find((c) => c[0] === "setMessage")[1]),
+    ]);
+    expect([saleMsg[0], saleMsg[1].event]).toEqual(["0.0.3003", "SALE"]);
+    expect([unlistedMsg[0], unlistedMsg[1].event, unlistedMsg[1].reason, unlistedMsg[1].serials]).toEqual([
+      "0.0.3004",
+      "UNLISTED",
+      "sold",
+      ["7"],
+    ]);
     const sale = step("sale");
     expect(hbarMoves(sale)).toEqual([
       ["0.0.6006", "-10000000000"],
@@ -245,9 +258,10 @@ describe("sellOwnItem.js", () => {
     mockDependencies({ hcsReceiptError: new Error("INVALID_SIGNATURE") });
     await runScript("7", "100");
 
+    expect(console.error).toHaveBeenCalledWith("❌ Sale 0.0.1001@1700000000.7 settled, but:");
+    expect(console.error).toHaveBeenCalledWith(expect.stringMatching(/SALE was not recorded \(INVALID_SIGNATURE\); record it by hand/));
     expect(console.error).toHaveBeenCalledWith(
-      "❌ Sale 0.0.1001@1700000000.7 settled but the HCS record failed:",
-      expect.objectContaining({ message: "INVALID_SIGNATURE" }),
+      expect.stringMatching(/UNLISTED was not posted \(INVALID_SIGNATURE\); post it by hand: displayEvent.js unlisted 7 --reason sold/),
     );
     expect(process.exitCode).toBe(1);
   });
@@ -315,7 +329,7 @@ describe("sellOwnItem.js", () => {
     mockDependencies({ topicEvents: [...topic, { event: "BURN", token_id: "0.0.4004", serials: ["1"] }] });
     await runScript("3", "100");
 
-    expect(calls.steps.map((s) => s.name)).toEqual(["sale", "hcs"]);
+    expect(calls.steps.map((s) => s.name)).toEqual(["sale", "hcs", "hcs"]);
     expect(process.exitCode).toBeUndefined();
   });
 

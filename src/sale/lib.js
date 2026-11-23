@@ -1,13 +1,23 @@
 /**
  * @file sale/lib.js
- * @description Argument and environment checks for sellOwnItem.js, kept apart
- * from it so they can be tested without a network.
+ * @description A sale of an item UA holds itself, from the Treasury, in parts
+ * that both sellOwnItem.js (the command line) and the sale backend
+ * (umina-achala-server, umina-achala-web#116) use, so a sale ends the same
+ * way from either: the argument and environment checks, the plan (what moves,
+ * checked against the provenance topic and the holders), the one atomic
+ * transfer, and what follows a settled sale: SALE on the provenance topic and
+ * UNLISTED (reason "sold") on the display topic (recordSold).
  */
 
 import { parseArgs } from "util";
+import { AccountId, NftId, TokenId, TransferTransaction } from "@hashgraph/sdk";
+import { holderProblems, readHolders } from "../nfts.js";
+import { mountIds } from "../provenance.js";
+import { achalaSaleFields, achalaSalePlan, mintOfSerial, mountedProblem } from "../mint/achala.js";
+import { buildEvent, submitEvent, submitKeyProblem } from "../hcs.js";
+import { displayFields } from "../display/lib.js";
 import { treasuryKeyProblem } from "../keys.js";
 import { envProblems, serialProblem } from "../env.js";
-import { submitKeyProblem } from "../hcs.js";
 import { TOKEN_CLASSES, tokenClassProblem } from "../token/lib.js";
 
 /**
@@ -19,6 +29,7 @@ export const REQUIRED = [
   "OPERATOR_KEY",
   "TREASURY_ID",
   "HCS_TOPIC_ID",
+  "HCS_DISPLAY_TOPIC_ID",
   "BUYER_ID",
   "BUYER_KEY",
 ];
@@ -71,4 +82,128 @@ export function saleProblems(env, serial, price, tokenClass = "umina") {
     if (problem) problems.push(problem);
   }
   return problems;
+}
+
+/**
+ * What a sale of one item moves, checked: an Achala moves with its mounted
+ * stones, an Umiña mounted in an Achala that still exists is refused, and the
+ * Treasury must hold every NFT that moves (mirror node).
+ * @param {Record<string, string | undefined>} env the token IDs and TREASURY_ID
+ * @param {object[]} events the provenance topic's events
+ * @param {{ tokenClass: "umina" | "achala", serial: string }} item
+ * @param {{ holders?: typeof readHolders }} [deps]
+ * @returns {Promise<{ problems: string[] } | { problems: [], tokenClass: string, tokenId: TokenId,
+ *   nftId: NftId, nftIds: NftId[], stoneId?: string, achalaId?: string, stones: object[], uminaTokenId: TokenId | null }>}
+ */
+export async function planSale(env, events, { tokenClass, serial }, { holders = readHolders } = {}) {
+  const isAchala = tokenClass === "achala";
+  const tokenId = TokenId.fromString(env[TOKEN_CLASSES[tokenClass].envVar]);
+  const nftId = new NftId(tokenId, Number(serial));
+  const ids = mountIds(env, serial);
+  let plan = { stones: [] };
+  if (isAchala) {
+    plan = achalaSalePlan(events, ids);
+    if (plan.problems.length) return { problems: plan.problems };
+  } else {
+    const mounted = mountedProblem(events, ids);
+    if (mounted) return { problems: [mounted] };
+  }
+  const uminaTokenId = isAchala ? TokenId.fromString(env.UMINA_TOKEN_ID) : null;
+  const nftIds = [nftId, ...plan.stones.map((s) => new NftId(uminaTokenId, Number(s.serial)))];
+  const held = holderProblems(nftIds, await holders(nftIds), env.TREASURY_ID);
+  if (held.length) return { problems: held };
+  return {
+    problems: [],
+    tokenClass,
+    tokenId,
+    nftId,
+    nftIds,
+    // the item's own stone_id, from its MINT (an Achala's is its achalaId)
+    stoneId: mintOfSerial(events, tokenId.toString(), serial)?.event.stone_id,
+    ...(isAchala && { achalaId: plan.achalaId }),
+    stones: plan.stones,
+    uminaTokenId,
+  };
+}
+
+/**
+ * The one atomic transfer of a sale, not yet frozen: the buyer pays the price
+ * to UA, and the Treasury sends every NFT of the plan to the buyer.
+ * @param {{ uaId: string, treasuryId: string, buyerId: string, price: import("@hashgraph/sdk").Hbar }} parties
+ * @param {{ tokenClass: string, nftId: NftId, nftIds: NftId[] }} plan from planSale
+ * @returns {TransferTransaction}
+ */
+export function saleTransaction({ uaId, treasuryId, buyerId, price }, plan) {
+  const buyer = AccountId.fromString(String(buyerId));
+  const treasury = AccountId.fromString(String(treasuryId));
+  let tx = new TransferTransaction()
+    .addHbarTransfer(buyer, price.negated())
+    .addHbarTransfer(AccountId.fromString(String(uaId)), price);
+  for (const id of plan.nftIds) tx = tx.addNftTransfer(id, treasury, buyer);
+  return tx.setTransactionMemo(`${TOKEN_CLASSES[plan.tokenClass].name} sale ${plan.nftId}`);
+}
+
+/**
+ * The SALE event of a settled sale (umina-achala-chain#17, #19).
+ * @param {{ uaId: string, treasuryId: string, buyerId: string, price: import("@hashgraph/sdk").Hbar, saleTxId: string }} sale
+ * @param {object} plan from planSale
+ */
+export function saleEvent({ uaId, treasuryId, buyerId, price, saleTxId }, plan) {
+  const isAchala = plan.tokenClass === "achala";
+  return buildEvent(
+    {
+      event: "SALE",
+      ...(isAchala && { stoneId: plan.achalaId }),
+      tokenId: plan.tokenId,
+      serials: [String(plan.nftId.serial)],
+      actorId: uaId,
+      ref: saleTxId,
+    },
+    {
+      seller_id: String(treasuryId),
+      buyer_id: String(buyerId),
+      payment: "on_chain",
+      sold_for: price.toBigNumber().toString(),
+      currency: "HBAR",
+      price_tinybars: price.toTinybars().toString(),
+      ...(isAchala && achalaSaleFields(plan.stones, plan.uminaTokenId)),
+    },
+  );
+}
+
+/**
+ * What follows a settled sale, from the command line or the site: SALE on the
+ * provenance topic, then UNLISTED (reason "sold") on the display topic, so the
+ * item leaves the catalog. It never throws: the sale has settled, so each step
+ * that fails is returned with how to record it by hand.
+ * @param {import("@hashgraph/sdk").Client} client UA's client
+ * @param {Record<string, string | undefined>} env HCS_TOPIC_ID, HCS_DISPLAY_TOPIC_ID
+ * @param {{ uaId: string, treasuryId: string, buyerId: string, price: import("@hashgraph/sdk").Hbar, saleTxId: string }} sale
+ * @param {object} plan from planSale
+ * @param {{ submitKey?: import("@hashgraph/sdk").PrivateKey | null, submit?: typeof submitEvent }} [options]
+ * @returns {Promise<{ saleEventTxId?: string, unlistedTxId?: string, problems: string[] }>}
+ */
+export async function recordSold(client, env, sale, plan, { submitKey = null, submit = submitEvent } = {}) {
+  const out = { problems: [] };
+  const serial = String(plan.nftId.serial);
+  const token = plan.tokenClass === "achala" ? " --token achala" : "";
+  try {
+    out.saleEventTxId = await submit(client, env.HCS_TOPIC_ID, saleEvent(sale, plan), submitKey);
+  } catch (err) {
+    out.problems.push(
+      `SALE was not recorded (${err.message}); record it by hand: recordEvent.js with the sale ${sale.saleTxId}`,
+    );
+  }
+  try {
+    const message = buildEvent(
+      { event: "UNLISTED", stoneId: plan.stoneId, tokenId: plan.tokenId, serials: [serial], actorId: sale.uaId },
+      displayFields({ command: "unlisted", reason: "sold" }),
+    );
+    out.unlistedTxId = await submit(client, env.HCS_DISPLAY_TOPIC_ID, message, submitKey);
+  } catch (err) {
+    out.problems.push(
+      `UNLISTED was not posted (${err.message}); post it by hand: displayEvent.js unlisted ${serial}${token} --reason sold`,
+    );
+  }
+  return out;
 }

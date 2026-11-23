@@ -185,3 +185,47 @@ export async function latestArrival(tokenId, serial, accountId, fetchFn = fetch)
   }
   return null;
 }
+
+/**
+ * Whether an account can receive a token's NFTs (umina-achala-web#116): its
+ * key, and for each token whether it is associated, or whether the account
+ * associates new tokens on its own (max_automatic_token_associations -1, or
+ * a free slot left). Returns null when the account does not exist.
+ * @param {string} accountId
+ * @param {string[]} tokenIds
+ * @param {typeof fetch} [fetchFn]
+ * @returns {Promise<{ key: { _type: string, key: string } | null, notAssociated: string[] } | null>}
+ */
+export async function buyerAccount(accountId, tokenIds, fetchFn = fetch) {
+  const account = await getJson(`/api/v1/accounts/${accountId}`, fetchFn);
+  if (!account) return null;
+  const max = account.max_automatic_token_associations ?? 0;
+  const notAssociated = [];
+  let autoUsed = null;
+  for (const tokenId of tokenIds) {
+    const page = await getJson(`/api/v1/accounts/${accountId}/tokens?token.id=${tokenId}`, fetchFn);
+    if ((page?.tokens ?? []).length) continue;
+    if (max === -1) continue;
+    if (max > 0) {
+      // automatic slots in use: the account's associations made automatically
+      autoUsed ??= await countAutoAssociations(accountId, fetchFn);
+      if (autoUsed < max) {
+        autoUsed++;
+        continue;
+      }
+    }
+    notAssociated.push(tokenId);
+  }
+  return { key: account.key ?? null, notAssociated };
+}
+
+async function countAutoAssociations(accountId, fetchFn) {
+  let count = 0;
+  let next = `/api/v1/accounts/${accountId}/tokens?limit=100`;
+  while (next) {
+    const page = await getJson(next, fetchFn);
+    count += (page?.tokens ?? []).filter((t) => t.automatic_association).length;
+    next = page?.links?.next ?? null;
+  }
+  return count;
+}

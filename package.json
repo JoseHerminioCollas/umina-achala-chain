@@ -3,6 +3,22 @@
   "version": "1.0.0",
   "description": "Hedera HTS and HCS scripts for Peruvian gemstone tracking",
   "type": "module",
+  "exports": {
+    "./sdk": "./src/sdk.js",
+    "./sale": "./src/sale/lib.js",
+    "./hcs": "./src/hcs.js",
+    "./keys": "./src/keys.js",
+    "./env": "./src/env.js",
+    "./network": "./src/network.js",
+    "./script": "./src/script.js",
+    "./mirror": "./src/mirror.js",
+    "./provenance": "./src/provenance.js",
+    "./achala": "./src/mint/achala.js",
+    "./display": "./src/display/lib.js",
+    "./token": "./src/token/lib.js",
+    "./catalog/buildCatalog.js": "./src/catalog/buildCatalog.js",
+    "./package.json": "./package.json"
+  },
   "scripts": {
     "validate": "node src/mint/validateMetadata.js json/umina-example.json",
     "test": "jest"
