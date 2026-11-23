@@ -402,10 +402,29 @@ describe("mounted stones and Achala sales (umina-achala-chain#24, #26)", () => {
       "has a stone minted twice",
       [...events, stoneMint("UMINA-2026-CH-05", "6"), achalaMint("ACHALA-2026-PE-02", "2", ["UMINA-2026-CH-05"])],
       "2",
-      "UMINA-2026-CH-05 was minted 2 times; sell this Achala by hand",
+      "UMINA-2026-CH-05 was minted 2 times and 2 of its serials are not burned; sell this Achala by hand",
+    ],
+    [
+      "has a stone whose every serial is burned",
+      [...events, ev({ event: "BURN", token_id: U, serials: ["5"] }), achalaMint("ACHALA-2026-PE-02", "2", ["UMINA-2026-CH-05"])],
+      "2",
+      "every serial of UMINA-2026-CH-05 is burned",
     ],
   ])("achalaSalePlan refuses an Achala that %s", (_, list, serial, problem) => {
     expect(achalaSalePlan(list, ids(serial)).problems).toEqual([problem]);
+  });
+
+  test("achalaSalePlan takes a reminted stone's serial that is not burned", () => {
+    const reminted = [
+      ...events,
+      ev({ event: "BURN", token_id: U, serials: ["5"] }),
+      stoneMint("UMINA-2026-CH-05", "6"),
+      achalaMint("ACHALA-2026-PE-02", "2", ["UMINA-2026-CH-05"]),
+    ];
+    expect(achalaSalePlan(reminted, ids("2"))).toMatchObject({
+      stones: [{ stone_id: "UMINA-2026-CH-05", serial: "6" }],
+      problems: [],
+    });
   });
 
   test("achalaSalePlan refuses a piece over the NFT transfer limit", () => {

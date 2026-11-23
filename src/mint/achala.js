@@ -265,8 +265,10 @@ export function mountedProblem(events, { uminaTokenId, achalaTokenId, serial }) 
  * What an Achala sale moves, from the provenance topic: the Achala's own
  * MINT (its stone_id and from_stone_ids) and each stone's Umiña serial, from
  * the stone's MINT (umina-achala-chain#26). Refuses an Achala that was never
- * minted or is burned, a stone with no MINT or minted more than once (its
- * serial would be a guess), and a piece over MAX_NFT_TRANSFERS.
+ * minted or is burned, a stone with no MINT, a stone whose every serial is
+ * burned, a stone with more than one serial not burned (its serial would be
+ * a guess), and a piece over MAX_NFT_TRANSFERS. A stone minted again after
+ * its old serial was burned (a remint) is the serial not burned.
  * @returns {{ achalaId?: string, stones?: Array<{ stone_id: string, serial: string }>, problems: string[] }}
  */
 export function achalaSalePlan(events, { uminaTokenId, achalaTokenId, serial }) {
@@ -283,15 +285,22 @@ export function achalaSalePlan(events, { uminaTokenId, achalaTokenId, serial }) 
       ({ event }) =>
         event.event === "MINT" && event.stone_id === stoneId && event.token_id === String(uminaTokenId),
     );
-    if (mints.length !== 1) {
+    if (!mints.length) {
+      problems.push(`${stoneId} has no MINT event in the Umiña token ${uminaTokenId}`);
+      continue;
+    }
+    // A stone minted again (a remint) has its old serial burned: the one
+    // serial that is not burned is the stone.
+    const live = mints.filter(({ event }) => !isBurned(events, uminaTokenId, event.serials[0]));
+    if (live.length !== 1) {
       problems.push(
-        mints.length
-          ? `${stoneId} was minted ${mints.length} times; sell this Achala by hand`
-          : `${stoneId} has no MINT event in the Umiña token ${uminaTokenId}`,
+        live.length
+          ? `${stoneId} was minted ${mints.length} times and ${live.length} of its serials are not burned; sell this Achala by hand`
+          : `every serial of ${stoneId} is burned`,
       );
       continue;
     }
-    stones.push({ stone_id: stoneId, serial: String(mints[0].event.serials[0]) });
+    stones.push({ stone_id: stoneId, serial: String(live[0].event.serials[0]) });
   }
   if (!stones.length && !problems.length) problems.push(`Achala ${nft} lists no stones in its MINT`);
   if (stones.length + 1 > MAX_NFT_TRANSFERS) {

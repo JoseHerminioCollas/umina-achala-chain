@@ -234,13 +234,16 @@ export function parseAdminArgs(argv) {
   } catch (err) {
     return { problems: [err.message] };
   }
-  const [command, serial] = positionals;
+  const [command, serial, ...extra] = positionals;
   const input = {
     command,
     serial,
     dryRun: Boolean(values["dry-run"]),
     tokenClass: values.token ?? "umina",
   };
+  // A --reason of several words without quotes leaves the rest here: refuse
+  // it, or the BURN event records only the first word.
+  if (extra.length) return { ...input, problems: [`too many arguments: ${extra.join(" ")} (quote a --reason of several words)`] };
   const tokenProblem = tokenClassProblem(input.tokenClass);
   if (tokenProblem) return { ...input, problems: [tokenProblem] };
   if (!ADMIN_COMMANDS[command]) {

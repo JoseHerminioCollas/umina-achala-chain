@@ -47,6 +47,15 @@ describe("parseAdminArgs", () => {
     ]);
   });
 
+  test("extra words are refused, such as a --reason without quotes", () => {
+    expect(parseAdminArgs(["burn", "5", "--token", "achala", "--reason", '"Reminted:', "one", "file"]).problems).toEqual([
+      "too many arguments: one file (quote a --reason of several words)",
+    ]);
+    expect(parseAdminArgs(["pause", "x", "y"]).problems).toEqual([
+      "too many arguments: y (quote a --reason of several words)",
+    ]);
+  });
+
   test("wipe needs a serial, the account and a reason", () => {
     expect(
       parseAdminArgs(["wipe", "7", "--account", "0.0.6006", "--reason", "Stolen, police report 123"]),

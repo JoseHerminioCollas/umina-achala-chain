@@ -119,4 +119,13 @@ describe("associateToken.js", () => {
     expect(calls.forTestnet).not.toHaveBeenCalled();
     expect(process.exitCode).toBe(1);
   });
+
+  test("an extra argument is refused and nothing is sent", async () => {
+    mockDependencies();
+    await runScript("buyer", "merchant");
+
+    expect(console.error).toHaveBeenCalledWith("   - too many arguments: merchant");
+    expect(calls.forTestnet).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(1);
+  });
 });

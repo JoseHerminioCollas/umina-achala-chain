@@ -35,7 +35,8 @@ try {
   [role] = positionals;
   dryRun = Boolean(values["dry-run"]);
   tokenClass = values.token ?? "umina";
-  argProblem = tokenClassProblem(tokenClass);
+  argProblem =
+    positionals.length > 1 ? `too many arguments: ${positionals.slice(1).join(" ")}` : tokenClassProblem(tokenClass);
 } catch (err) {
   argProblem = err.message;
 }

@@ -24,6 +24,12 @@ const saleArgs = (...extra) => [
 ];
 
 describe("parseRecordArgs", () => {
+  test("an extra argument is refused (a value of several words without quotes)", () => {
+    expect(parseRecordArgs(["delivered", "7", "--method", "in_person", "extra"]).problems).toEqual([
+      "too many arguments: extra (quote a value of several words)",
+    ]);
+  });
+
   test("parses an on_chain sale, with HBAR as the default currency", () => {
     const input = parseRecordArgs(saleArgs("--payment", "on_chain", "--sold-for", "100"));
     expect(input.problems).toEqual([]);

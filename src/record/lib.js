@@ -60,7 +60,7 @@ export function parseRecordArgs(argv) {
   } catch (err) {
     return { problems: [err.message] };
   }
-  const [command, serial] = positionals;
+  const [command, serial, ...extra] = positionals;
   const problems = [];
   const input = {
     command,
@@ -73,6 +73,8 @@ export function parseRecordArgs(argv) {
   if (!COMMANDS.includes(command)) {
     return { ...input, problems: [`give the event: ${COMMANDS.join(" or ")}`] };
   }
+  // An option value of several words without quotes leaves the rest here.
+  if (extra.length) return { ...input, problems: [`too many arguments: ${extra.join(" ")} (quote a value of several words)`] };
   const tokenProblem = tokenClassProblem(input.tokenClass);
   if (tokenProblem) problems.push(tokenProblem);
   if (!/^[1-9]\d*$/.test(serial ?? "")) {
