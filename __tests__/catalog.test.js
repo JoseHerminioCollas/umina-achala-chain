@@ -14,6 +14,7 @@ import {
   sortNfts,
 } from "../src/catalog/lib.js";
 import { cidOfNftMetadata, cidOfUri, fetchIpfsBytes, fetchIpfsJson, ipfsGateway, ipfsPathOfUri, NotJsonError } from "../src/ipfs.js";
+import { fileUris, filePath } from "../src/catalog/media.js";
 import { tokenNfts } from "../src/mirror.js";
 
 // The catalog builder's rules (umina-achala-chain#44), the gateway reader and
@@ -182,6 +183,31 @@ describe("metadataCache", () => {
   });
 });
 
+describe("catalog/media.js: models and documents (#46)", () => {
+  const nftWith = (...files) => ({ metadata: { image: "ipfs://QmPhoto", files } });
+  const model = { uri: "ipfs://QmModel", type: "model/gltf-binary" };
+  const pdf = { uri: "ipfs://QmDir/receipt.pdf", type: "application/pdf" };
+
+  test("fileUris lists each model and PDF once, an Achala's stones too, and no photos", () => {
+    const items = [
+      nftWith({ uri: "ipfs://QmOther", type: "image/jpeg" }, model, pdf),
+      { ...nftWith(pdf, { uri: "ipfs://QmText", type: "text/plain" }), stones: [nftWith({ uri: "ipfs://QmStonePdf", type: "application/pdf" })] },
+    ];
+    expect(fileUris(items)).toEqual([
+      { uri: "ipfs://QmModel", type: "model/gltf-binary" },
+      { uri: "ipfs://QmDir/receipt.pdf", type: "application/pdf" },
+      { uri: "ipfs://QmStonePdf", type: "application/pdf" },
+    ]);
+  });
+
+  test("filePath: media/<ipfs path>/model.glb or document.pdf; null for another type or URI", () => {
+    expect(filePath(model.uri, model.type)).toEqual({ file: "media/QmModel/model.glb" });
+    expect(filePath(pdf.uri, pdf.type)).toEqual({ file: "media/QmDir/receipt.pdf/document.pdf" });
+    expect(filePath("ipfs://QmText", "text/plain")).toBeNull();
+    expect(filePath("https://example.com/a.pdf", "application/pdf")).toBeNull();
+  });
+});
+
 describe("the catalog document", () => {
   const umina = JSON.parse(fs.readFileSync("json/umina-example.json", "utf8"));
   const price = { amount: "45", currency: "HBAR", listed_seq: 3, listed_at: "3.0" };
@@ -228,6 +254,15 @@ describe("the catalog document", () => {
   test("matches schema/catalog-schema.json", () => {
     expect(catalogProblems(doc())).toEqual([]);
     expect(catalogProblems({ ...doc(), items: [] })).toEqual([]);
+  });
+
+  test("media: a photo's two copies or a model's or document's one file (#46)", () => {
+    const withMedia = (media) => catalogProblems({ ...doc(), media });
+    const photo = { thumb: "media/QmA/thumb.webp", display: "media/QmA/display.webp" };
+    expect(withMedia({ "ipfs://QmA": photo, "ipfs://QmM": { file: "media/QmM/model.glb" }, "ipfs://QmD": { file: "media/QmD/document.pdf" } })).toEqual([]);
+    expect(withMedia({ "ipfs://QmD": { file: "media/QmD/document.exe" } })).not.toEqual([]);
+    expect(withMedia({ "ipfs://QmD": { file: "media/QmD/document.pdf", thumb: "media/QmD/thumb.webp" } })).not.toEqual([]);
+    expect(withMedia({ "ipfs://QmA": { thumb: photo.thumb } })).not.toEqual([]);
   });
 
   test("the schema refuses an Achala without stones, a stone with a price, a bad price or an extra key", () => {

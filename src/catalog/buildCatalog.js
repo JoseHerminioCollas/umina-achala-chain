@@ -25,9 +25,13 @@
  * A photo that cannot be read is left without a copy, with a warning; the
  * site then loads it through the gateway.
  *
+ * Each 3D model and PDF document is copied there too, unchanged
+ * (umina-achala-chain#46), the same way: once, and a file that cannot be read
+ * gets no copy, with a warning. The build ends with the size of media/.
+ *
  * The file is written to catalog.json.tmp, then renamed, so a build that
  * fails half way never leaves a broken catalog. --dry-run prints what would
- * be in it and writes nothing (no photo is read).
+ * be in it and writes nothing (no photo, model or document is read).
  */
 
 import { mkdir, readFile, rename, writeFile } from "fs/promises";
@@ -38,7 +42,7 @@ import { mirrorNode, networkName } from "../network.js";
 import { readDisplay, readProvenance } from "../provenance.js";
 import { mintOfSerial } from "../mint/achala.js";
 import { validateMetadata } from "../mint/metadataValidator.js";
-import { ensureMedia, photoUris } from "./media.js";
+import { MEDIA_DIR, ensureFile, ensureMedia, fileUris, folderSize, photoUris } from "./media.js";
 import {
   CATALOG_FILE,
   KINDS,
@@ -64,9 +68,10 @@ nothing is sent to Hedera.
 Usage:
   NETWORK=testnet node src/catalog/buildCatalog.js <out-dir> [--dry-run]
 
-  <out-dir>    where catalog.json and media/ (the photo copies) are written,
+  <out-dir>    where catalog.json and media/ (copies of the photos, 3D models
+               and documents) are written,
                e.g. ../umina-achala-web/frontend/public/data
-  IPFS_GATEWAY the gateway to read metadata and photos through (optional, in the env file)`;
+  IPFS_GATEWAY the gateway to read metadata and files through (optional, in the env file)`;
 
 const args = parseScriptArgs({ "dry-run": { type: "boolean" } }, 1);
 loadEnv();
@@ -215,6 +220,18 @@ runScript("Catalog build failed", async () => {
     }
   }
 
+  // --- 5b. 3D models and documents: a copy of each, unchanged, once (#46) ---
+  const files = { read: 0, onDisk: 0 };
+  for (const { uri, type } of fileUris(items)) {
+    try {
+      const { paths, read } = await ensureFile(outDir, uri, type, { dryRun });
+      media[uri] = paths;
+      files[read ? "read" : "onDisk"]++;
+    } catch (err) {
+      warnings.push(`file ${uri} (${type}) has no copy (the site loads it through the gateway): ${err.message}`);
+    }
+  }
+
   // --- 6. The catalog, checked against its schema ---
   const catalog = catalogDocument({
     network,
@@ -265,6 +282,13 @@ runScript("Catalog build failed", async () => {
       ? `Photos: ${photos.read} would be read through the gateway, ${photos.onDisk} already in ${outDir}/media.`
       : `Photos: ${photos.read} read through the gateway and copied, ${photos.onDisk} already in ${outDir}/media.`,
   );
+  console.log(
+    dryRun
+      ? `Models and documents: ${files.read} would be read through the gateway, ${files.onDisk} already in ${outDir}/media.`
+      : `Models and documents: ${files.read} read through the gateway and copied, ${files.onDisk} already in ${outDir}/media.`,
+  );
+  const mb = ((await folderSize(join(outDir, MEDIA_DIR))) / 1e6).toFixed(1);
+  console.log(`${outDir}/media holds ${mb} MB${dryRun ? " now" : ""}.`);
 
   // --- 8. Write it: a temp file, then rename ---
   const json = `${JSON.stringify(catalog, null, 2)}\n`;

@@ -32,17 +32,29 @@
       "items": { "$ref": "#/$defs/item" }
     },
     "media": {
-      "description": "The site's copies of each photo (umina-achala-chain#45): an item's image or image file, by its ipfs:// URI, to a thumbnail for the cards and a display copy for the detail view, WebP, relative to catalog.json. A photo with no entry is loaded through the gateway.",
+      "description": "The site's copies of the items' files, by ipfs:// URI, relative to catalog.json. A photo (an image or image file, umina-achala-chain#45) has a thumbnail for the cards and a display copy for the detail view, WebP. A 3D model or PDF document (umina-achala-chain#46) has one copy, unchanged. A file with no entry is loaded through the gateway.",
       "type": "object",
       "propertyNames": { "pattern": "^ipfs://" },
       "additionalProperties": {
-        "type": "object",
-        "required": ["thumb", "display"],
-        "additionalProperties": false,
-        "properties": {
-          "thumb": { "type": "string", "pattern": "^media/[A-Za-z0-9._/-]+\\.webp$" },
-          "display": { "type": "string", "pattern": "^media/[A-Za-z0-9._/-]+\\.webp$" }
-        }
+        "oneOf": [
+          {
+            "type": "object",
+            "required": ["thumb", "display"],
+            "additionalProperties": false,
+            "properties": {
+              "thumb": { "type": "string", "pattern": "^media/[A-Za-z0-9._/-]+\\.webp$" },
+              "display": { "type": "string", "pattern": "^media/[A-Za-z0-9._/-]+\\.webp$" }
+            }
+          },
+          {
+            "type": "object",
+            "required": ["file"],
+            "additionalProperties": false,
+            "properties": {
+              "file": { "type": "string", "pattern": "^media/[A-Za-z0-9._/-]+/(model\\.glb|document\\.pdf)$" }
+            }
+          }
+        ]
       }
     }
   },

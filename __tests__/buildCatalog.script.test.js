@@ -311,6 +311,71 @@ describe("buildCatalog.js", () => {
     expect(Object.keys(catalog.media)).toHaveLength(2);
   });
 
+  // the agate with a 3D model and two PDFs; the gold stone in the pendant shares one of them
+  const MODEL = Buffer.from("glTF fake model bytes");
+  const PDF = Buffer.from("%PDF-1.7 fake receipt");
+  const withFiles = (metadata, files) => ({ ...metadata, files });
+  const modelFile = { uri: "ipfs://QmModelAG", type: "model/gltf-binary", metadata: { description: "3D scan" } };
+  const receipt = { uri: "ipfs://QmReceipt", type: "application/pdf", metadata: { description: "Store receipt" } };
+  const permit = { uri: "ipfs://QmPermit", type: "application/pdf", metadata: { description: "Permit" } };
+  const otherPhoto = { uri: `ipfs://${photoCid("UMINA-2026-AG-01")}`, type: "image/png" };
+  const filesWithDocuments = (extra = {}) => ({
+    ...defaultFiles(),
+    Qm7x: withFiles(uminaMetadata("UMINA-2026-AG-01"), [otherPhoto, modelFile, receipt, permit]),
+    Qm8x: withFiles(uminaMetadata("UMINA-2026-AU-01"), [receipt]),
+    QmModelAG: MODEL,
+    QmReceipt: PDF,
+    QmPermit: PDF,
+    ...extra,
+  });
+
+  test("copies each 3D model and PDF once, unchanged, as a file entry in media (#46)", async () => {
+    mockDependencies({ files: filesWithDocuments() });
+    await run(dir);
+    expect(errors()).toBe("");
+    const catalog = JSON.parse(fs.readFileSync(file, "utf8"));
+    expect(catalog.media["ipfs://QmModelAG"]).toEqual({ file: "media/QmModelAG/model.glb" });
+    expect(catalog.media["ipfs://QmReceipt"]).toEqual({ file: "media/QmReceipt/document.pdf" });
+    expect(catalog.media["ipfs://QmPermit"]).toEqual({ file: "media/QmPermit/document.pdf" });
+    expect(fs.readFileSync(path.join(dir, "media/QmModelAG/model.glb"))).toEqual(MODEL);
+    expect(fs.readFileSync(path.join(dir, "media/QmReceipt/document.pdf"))).toEqual(PDF);
+    // the receipt is in two NFTs and read once; photos keep their two copies
+    expect(calls.gateway.filter((c) => c === "QmReceipt")).toHaveLength(1);
+    expect(Object.keys(catalog.media[`ipfs://${photoCid("UMINA-2026-AG-01")}`])).toEqual(["thumb", "display"]);
+    expect(logs()).toMatch(`Models and documents: 3 read through the gateway and copied, 0 already in ${dir}/media.`);
+    expect(logs()).toMatch(new RegExp(`${dir}/media holds \\d+\\.\\d MB\\.`));
+    expect(fs.readdirSync(path.join(dir, "media/QmReceipt"))).toEqual(["document.pdf"]);
+
+    // a second build reads nothing from the gateway
+    jest.resetModules();
+    console.log.mockClear();
+    mockDependencies({ files: filesWithDocuments() });
+    await run(dir);
+    expect(calls.gateway).toEqual([]);
+    expect(logs()).toMatch(`Models and documents: 0 read through the gateway and copied, 3 already in ${dir}/media.`);
+  });
+
+  test("--dry-run counts the models and documents it would read and writes none", async () => {
+    mockDependencies({ files: filesWithDocuments() });
+    await run(dir, "--dry-run");
+    expect(logs()).toMatch(`Models and documents: 3 would be read through the gateway, 0 already in ${dir}/media.`);
+    expect(logs()).toMatch(`${dir}/media holds 0.0 MB now.`);
+    expect(calls.gateway.filter((c) => /^Qm(Model|Receipt|Permit)/.test(c))).toEqual([]);
+    expect(fs.existsSync(path.join(dir, "media"))).toBe(false);
+  });
+
+  test("a model or document that cannot be read gets no copy, with a warning; the build goes on", async () => {
+    jest.spyOn(global, "setTimeout").mockImplementation((fn) => (fn(), 0));
+    mockDependencies({ files: filesWithDocuments({ QmPermit: 503 }) });
+    await run(dir);
+    expect(process.exitCode).toBeUndefined();
+    expect(logs()).toMatch(/⚠️ {2}file ipfs:\/\/QmPermit \(application\/pdf\) has no copy \(the site loads it through the gateway\): .*HTTP 503/);
+    const catalog = JSON.parse(fs.readFileSync(file, "utf8"));
+    expect(catalog.media["ipfs://QmPermit"]).toBeUndefined();
+    expect(catalog.media["ipfs://QmReceipt"]).toEqual({ file: "media/QmReceipt/document.pdf" });
+    expect(fs.existsSync(path.join(dir, "media/QmPermit"))).toBe(false);
+  });
+
   test("IPFS_GATEWAY changes the gateway", async () => {
     process.env.IPFS_GATEWAY = "https://ua.example/ipfs";
     mockDependencies();
