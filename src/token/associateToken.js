@@ -11,7 +11,7 @@
  *
  * Run from the command line, with NETWORK set (testnet or mainnet; it has no
  * default and the script refuses to run without it, see src/network.js):
- * NETWORK=testnet node src/consignment/associateToken.js <merchant|buyer> [--token umina|achala] [--dry-run]
+ * NETWORK=testnet node src/token/associateToken.js <merchant|buyer> [--token umina|achala] [--dry-run]
  *
  * Uses <ROLE>_ID and <ROLE>_KEY from the env file; the account's key signs and
  * UA (the operator) pays the fee. Testnet only: in production the account
@@ -20,9 +20,9 @@
 
 import { parseArgs } from "util";
 import { AccountId, TokenId } from "@hashgraph/sdk";
-import { associateToken, roleProblems, ROLES, tokenVars } from "./lib.js";
+import { associateToken, roleProblems, ROLES, tokenVars } from "./associate.js";
 import { parseEcdsaKey } from "../keys.js";
-import { tokenClassProblem } from "../token/lib.js";
+import { tokenClassProblem } from "./lib.js";
 import { fail, loadEnv, runScript } from "../script.js";
 
 let role, dryRun, tokenClass, argProblem;
@@ -44,7 +44,7 @@ loadEnv();
 
 const USAGE = `Associate a token with the merchant or buyer test account, so it can receive NFTs.
 
-Usage: NETWORK=testnet node src/consignment/associateToken.js <merchant|buyer> [--token umina|achala] [--dry-run]
+Usage: NETWORK=testnet node src/token/associateToken.js <merchant|buyer> [--token umina|achala] [--dry-run]
 
   <merchant|buyer>       the account: MERCHANT_ID/KEY or BUYER_ID/KEY
   --token umina|achala   umina (default) associates the Umiña token; achala

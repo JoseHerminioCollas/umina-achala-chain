@@ -26,7 +26,8 @@
  */
 
 import { AccountAllowanceApproveTransaction, AccountId, TokenId, TransferTransaction } from "@hashgraph/sdk";
-import { associateToken, consignmentNfts, consignmentProblems, tokenVars } from "./lib.js";
+import { consignmentNfts, consignmentProblems } from "./lib.js";
+import { associateToken, tokenVars } from "../token/associate.js";
 import { parseEcdsaKey, treasuryKeyProblem } from "../keys.js";
 import { buildEvent, loadSubmitKey, submitEvent, submitKeyProblem } from "../hcs.js";
 import { readProvenance } from "../provenance.js";

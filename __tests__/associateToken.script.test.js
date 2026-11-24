@@ -2,7 +2,7 @@ import { jest } from "@jest/globals";
 import { PrivateKey, Status } from "@hashgraph/sdk";
 import { actualSdk } from "../testHelpers/actualSdk.js";
 
-// Runs src/consignment/associateToken.js itself with Hedera and dotenv
+// Runs src/token/associateToken.js itself with Hedera and dotenv
 // mocked, and records the associations it sends.
 
 const operatorKey = PrivateKey.generateECDSA();
@@ -41,8 +41,8 @@ function mockDependencies({ associated = [] } = {}) {
 }
 
 async function runScript(...args) {
-  process.argv = ["node", "src/consignment/associateToken.js", ...args];
-  const { done } = await import("../src/consignment/associateToken.js");
+  process.argv = ["node", "src/token/associateToken.js", ...args];
+  const { done } = await import("../src/token/associateToken.js");
   await done;
 }
 

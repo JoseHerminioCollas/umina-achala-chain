@@ -1,25 +1,17 @@
 /**
  * @file consignment/lib.js
- * @description Helpers for the consignment scripts (associateToken.js,
- * consignToMerchant.js, sellConsigned.js, endConsignment.js), for an Umiña or
+ * @description Helpers for the consignment scripts (consignToMerchant.js,
+ * sellConsigned.js, endConsignment.js), for an Umiña or
  * an Achala with its stones (umina-achala-chain#28). See
  * umina-achala-documents/consignment.md.
  */
 
-import {
-  ReceiptStatusError,
-  Status,
-  TokenAssociateTransaction,
-} from "@hashgraph/sdk";
 import { NftId, TokenId } from "@hashgraph/sdk";
 import { ROYALTY } from "../token/lib.js";
 import { envProblems, serialProblem } from "../env.js";
 import { achalaSaleFields, achalaSalePlan, mountedProblem } from "../mint/achala.js";
 import { mountIds } from "../provenance.js";
 import ua from "../../config/umina-achala.js";
-
-/** Test accounts that can associate the token, by role (env var prefix). */
-export const ROLES = { merchant: "MERCHANT", buyer: "BUYER" };
 
 /**
  * UA's commission on a sale through UA's site, in basis points (30.00%). It
@@ -102,59 +94,6 @@ export function consignmentProblems(env, required, serial) {
   const bad = serialProblem(serial);
   if (bad) problems.push(bad);
   return problems;
-}
-
-/**
- * Lists the problems with associateToken.js's role and environment.
- * @param {Record<string, string | undefined>} env
- * @param {string | undefined} role "merchant" or "buyer"
- * @param {"umina" | "achala"} [tokenClass] the token to associate
- * @returns {string[]}
- */
-export function roleProblems(env, role, tokenClass = "umina") {
-  const prefix = ROLES[role];
-  if (!prefix) return [`give the role: ${Object.keys(ROLES).join(" or ")}`];
-  return envProblems(env, [
-    "OPERATOR_ID",
-    "OPERATOR_KEY",
-    ...tokenVars(tokenClass),
-    `${prefix}_ID`,
-    `${prefix}_KEY`,
-  ]);
-}
-
-/**
- * Associates an account with a token, signed by that account's key. The
- * client's operator pays the fee.
- * @param {import("@hashgraph/sdk").Client} client
- * @param {import("@hashgraph/sdk").AccountId} accountId
- * @param {import("@hashgraph/sdk").PrivateKey} accountKey
- * @param {import("@hashgraph/sdk").TokenId} tokenId
- * @returns {Promise<boolean>} false when the account was already associated
- */
-export async function associateToken(client, accountId, accountKey, tokenId) {
-  try {
-    const tx = await new TokenAssociateTransaction()
-      .setAccountId(accountId)
-      .setTokenIds([tokenId])
-      .freezeWith(client)
-      .sign(accountKey);
-    await (await tx.execute(client)).getReceipt(client);
-    return true;
-  } catch (err) {
-    if (err instanceof ReceiptStatusError && err.status === Status.TokenAlreadyAssociatedToAccount) {
-      return false;
-    }
-    throw err;
-  }
-}
-
-/**
- * The token ID variables a consignment script needs for a class: an Achala
- * also needs UMINA_TOKEN_ID, since its stones move with it (#28).
- */
-export function tokenVars(tokenClass = "umina") {
-  return tokenClass === "achala" ? ["UMINA_TOKEN_ID", "ACHALA_TOKEN_ID"] : ["UMINA_TOKEN_ID"];
 }
 
 /**

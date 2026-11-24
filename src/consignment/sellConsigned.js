@@ -29,7 +29,8 @@
  */
 
 import { AccountId, Hbar, TokenId, TransactionId, TransferTransaction } from "@hashgraph/sdk";
-import { consignmentNfts, consignmentProblems, consignmentSplit, royaltyCount, tokenVars } from "./lib.js";
+import { consignmentNfts, consignmentProblems, consignmentSplit, royaltyCount } from "./lib.js";
+import { tokenVars } from "../token/associate.js";
 import { buildEvent, loadSubmitKey, submitEvent, submitKeyProblem } from "../hcs.js";
 import { parseEcdsaKey } from "../keys.js";
 import { readProvenance } from "../provenance.js";
