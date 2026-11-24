@@ -1,6 +1,6 @@
 import { jest } from "@jest/globals";
 import { Hbar, NftId, TokenId } from "@hashgraph/sdk";
-import { recordSold } from "../src/sale/lib.js";
+import { recordSold, saleChecks } from "../src/sale/lib.js";
 import { buyerAccount } from "../src/mirror.js";
 
 // The parts of a sale the command line and umina-achala-server share
@@ -63,10 +63,14 @@ describe("buyerAccount", () => {
       ["/api/v1/accounts/0.0.6006/tokens?token.id=0.0.2002", { tokens: [{ token_id: "0.0.2002" }] }],
       ["/api/v1/accounts/0.0.6006/tokens?token.id=", { tokens: [] }],
       ["/api/v1/accounts/0.0.6006/tokens?limit", { tokens: [{ automatic_association: true }], links: { next: null } }],
-      ["/api/v1/accounts/0.0.6006", { key, max_automatic_token_associations: 2 }],
+      ["/api/v1/accounts/0.0.6006", { key, max_automatic_token_associations: 2, balance: { balance: 2500000000 } }],
     ]);
-    // 0.0.2002 associated; 0.0.2003 takes the second automatic slot
-    expect(await buyerAccount("0.0.6006", ["0.0.2002", "0.0.2003"], fetchFn)).toEqual({ key, notAssociated: [] });
+    // 0.0.2002 associated; 0.0.2003 takes the second automatic slot; the balance in tinybars
+    expect(await buyerAccount("0.0.6006", ["0.0.2002", "0.0.2003"], fetchFn)).toEqual({
+      key,
+      notAssociated: [],
+      balance: 2500000000,
+    });
   });
 
   test("lists the tokens the account cannot receive; null for a missing account", async () => {
@@ -75,12 +79,72 @@ describe("buyerAccount", () => {
       ["/api/v1/accounts/0.0.6006/tokens?limit", { tokens: [{ automatic_association: true }], links: { next: null } }],
       ["/api/v1/accounts/0.0.6006", { key, max_automatic_token_associations: 1 }],
     ]);
-    expect(await buyerAccount("0.0.6006", ["0.0.2002"], full)).toEqual({ key, notAssociated: ["0.0.2002"] });
+    expect(await buyerAccount("0.0.6006", ["0.0.2002"], full)).toEqual({ key, notAssociated: ["0.0.2002"], balance: null });
     const unlimited = route([
       ["/api/v1/accounts/0.0.6006/tokens", { tokens: [] }],
       ["/api/v1/accounts/0.0.6006", { key, max_automatic_token_associations: -1 }],
     ]);
     expect((await buyerAccount("0.0.6006", ["0.0.2002"], unlimited)).notAssociated).toEqual([]);
     expect(await buyerAccount("0.0.6006", ["0.0.2002"], route([]))).toBeNull();
+  });
+});
+
+describe("saleChecks", () => {
+  const plan = {
+    tokenClass: "umina",
+    tokenId: TokenId.fromString("0.0.2002"),
+    nftId: new NftId(TokenId.fromString("0.0.2002"), 7),
+    nftIds: [new NftId(TokenId.fromString("0.0.2002"), 7)],
+    stoneId: "UMINA-2026-QZ-01",
+  };
+  const env = { TREASURY_ID: "0.0.1001", HCS_DISPLAY_TOPIC_ID: "0.0.3004" };
+  const buyer = async () => ({ key: null, notAssociated: [], balance: 1000 * 1e8 });
+  const listed = async () => ({
+    events: [{ sequence_number: 1, event: { event: "LISTED", token_id: "0.0.2002", serials: ["7"], price: "100" } }],
+  });
+  const arrival = async () => null;
+
+  test("a listed item at its price, and a buyer who can pay: nothing to say", async () => {
+    const out = await saleChecks(env, plan, { buyerId: "0.0.6006", price: Hbar.fromString("100") }, {
+      display: listed,
+      arrival,
+      account: buyer,
+    });
+    expect(out).toEqual({ problems: [], warnings: [], listed: true });
+  });
+
+  test("an unreadable display topic is a warning, and UNLISTED is still posted (listed is null)", async () => {
+    const out = await saleChecks(env, plan, { buyerId: "0.0.6006", price: Hbar.fromString("100") }, {
+      display: async () => ({ problem: "cannot read HCS_DISPLAY_TOPIC_ID 0.0.3004: down" }),
+      arrival,
+      account: buyer,
+    });
+    expect(out).toEqual({
+      problems: [],
+      warnings: ["the listing was not checked (cannot read HCS_DISPLAY_TOPIC_ID 0.0.3004: down)"],
+      listed: null,
+    });
+  });
+
+  test("a mirror node error on the buyer is a problem", async () => {
+    const out = await saleChecks(env, plan, { buyerId: "0.0.6006", price: Hbar.fromString("100") }, {
+      display: listed,
+      arrival,
+      account: async () => {
+        throw new Error("mirror node request failed: 500");
+      },
+    });
+    expect(out.problems).toEqual(["cannot check the buyer's account 0.0.6006 (mirror node request failed: 500)"]);
+  });
+
+  test("a price of one tinybar is written in full", async () => {
+    const out = await saleChecks(env, plan, { buyerId: "0.0.6006", price: Hbar.fromString("0.00000001") }, {
+      display: listed,
+      arrival,
+      account: buyer,
+    });
+    expect(out.warnings).toEqual([
+      "UMINA-2026-QZ-01 (0.0.2002/7) is listed on the site at 100 HBAR; this sale is for 0.00000001 HBAR",
+    ]);
   });
 });

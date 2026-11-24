@@ -44,8 +44,25 @@ function mockTransaction(name, { executeError, receiptError, txId } = {}) {
   });
 }
 
-function mockDependencies({ holder = "0.0.1001", saleError, hcsReceiptError, topicEvents = [] } = {}) {
-  calls.mirror = mockMirror(topicEvents, { holder });
+// Served as the messages of both topics: the item is listed at 100 HBAR.
+const listedAt100 = [
+  { event: "LISTED", token_id: "0.0.2002", serials: ["7"], price: "100", currency: "HBAR" },
+  { event: "LISTED", token_id: "0.0.2002", serials: ["3"], price: "100", currency: "HBAR" },
+  { event: "LISTED", token_id: "0.0.4004", serials: ["1"], price: "500", currency: "HBAR" },
+];
+
+// The buyer has associated both tokens and holds 1000 HBAR.
+const buyerAccount = { balance: 1000 * 1e8, tokens: ["0.0.2002", "0.0.4004"] };
+
+function mockDependencies({
+  holder = "0.0.1001",
+  saleError,
+  hcsReceiptError,
+  topicEvents = [],
+  listings = listedAt100,
+  buyer = buyerAccount,
+} = {}) {
+  calls.mirror = mockMirror([...topicEvents, ...listings], { holder, accounts: buyer ? { "0.0.6006": buyer } : {} });
   calls.steps = [];
   calls.close = jest.fn();
   calls.forTestnet = jest.fn(() => ({ setOperator: jest.fn().mockReturnThis(), close: calls.close }));
@@ -145,6 +162,7 @@ describe("sellOwnItem.js", () => {
     jest.spyOn(console, "log").mockImplementation(() => {});
     jest.spyOn(console, "table").mockImplementation(() => {});
     jest.spyOn(console, "error").mockImplementation(() => {});
+    jest.spyOn(console, "warn").mockImplementation(() => {});
     process.exitCode = undefined;
   });
 
@@ -308,7 +326,73 @@ describe("sellOwnItem.js", () => {
       "https://testnet.mirrornode.hedera.com/api/v1/topics/0.0.3003",
       "https://testnet.mirrornode.hedera.com/api/v1/topics/0.0.3003/messages?limit=100&order=asc",
       "https://testnet.mirrornode.hedera.com/api/v1/tokens/0.0.2002/nfts/7",
+      "https://testnet.mirrornode.hedera.com/api/v1/topics/0.0.3004",
+      "https://testnet.mirrornode.hedera.com/api/v1/topics/0.0.3004/messages?limit=100&order=asc",
+      "https://testnet.mirrornode.hedera.com/api/v1/tokens/0.0.2002/nfts/7/transactions?limit=25&order=desc",
+      "https://testnet.mirrornode.hedera.com/api/v1/accounts/0.0.6006",
+      "https://testnet.mirrornode.hedera.com/api/v1/accounts/0.0.6006/tokens?token.id=0.0.2002",
     ]);
+  });
+
+  // --- The listing and the buyer (checked before anything is sent) ---
+
+  test("warns when the item is not listed, sells it, and records SALE but no UNLISTED", async () => {
+    mockDependencies({ listings: [] });
+    await runScript("7", "100");
+
+    expect(console.warn).toHaveBeenCalledWith(
+      "⚠️  0.0.2002/7 is not listed on the site; UNLISTED will not be posted after the sale",
+    );
+    expect(calls.steps.map((s) => s.name)).toEqual(["sale", "hcs"]);
+    expect(callsTo(calls.steps[1], "setTopicId")).toEqual([["0.0.3003"]]);
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  test("warns when the price differs from the listed price, and sells", async () => {
+    mockDependencies();
+    await runScript("7", "80.50");
+
+    expect(console.warn).toHaveBeenCalledWith(
+      "⚠️  0.0.2002/7 is listed on the site at 100 HBAR; this sale is for 80.5 HBAR",
+    );
+    expect(calls.steps.map((s) => s.name)).toEqual(["sale", "hcs", "hcs"]);
+  });
+
+  test("no warning when the item is listed at the price", async () => {
+    mockDependencies();
+    await runScript("7", "100", "--dry-run");
+
+    expect(console.warn).not.toHaveBeenCalled();
+  });
+
+  test.each([[[]], [["--dry-run"]]])("refuses a buyer who has not associated the token %j", async (extra) => {
+    mockDependencies({ buyer: { balance: 1000 * 1e8, tokens: [] } });
+    await runScript("7", "100", ...extra);
+
+    expect(console.error).toHaveBeenCalledWith(
+      "   - the buyer 0.0.6006 has not associated 0.0.2002: run associateToken.js buyer first",
+    );
+    expect(calls.steps).toEqual([]);
+    expect(process.exitCode).toBe(1);
+  });
+
+  test.each([[[]], [["--dry-run"]]])("refuses a buyer holding less HBAR than the price %j", async (extra) => {
+    mockDependencies({ buyer: { balance: 99.5 * 1e8, tokens: ["0.0.2002"] } });
+    await runScript("7", "100", ...extra);
+
+    expect(console.error).toHaveBeenCalledWith(
+      "   - the buyer 0.0.6006 holds 99.5 HBAR, less than the price of 100 HBAR",
+    );
+    expect(calls.steps).toEqual([]);
+    expect(process.exitCode).toBe(1);
+  });
+
+  test("refuses a buyer whose account is not on the mirror node", async () => {
+    mockDependencies({ buyer: null });
+    await runScript("7", "100");
+
+    expect(console.error).toHaveBeenCalledWith("   - the buyer's account 0.0.6006 was not found on the mirror node");
+    expect(calls.steps).toEqual([]);
   });
 
   test.each([[[]], [["--dry-run"]]])("refuses an Umiña mounted in an Achala, and sends nothing %j", async (extra) => {

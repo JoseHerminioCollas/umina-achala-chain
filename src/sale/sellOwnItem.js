@@ -27,8 +27,12 @@
  * Treasury signs the NFT transfer: with TREASURY_KEY when it is not the
  * operator account.
  *
- * Every run reads the provenance topic and the holders (mirror node) first;
- * --dry-run does those checks, shows the sale and sends nothing.
+ * Every run reads the provenance topic and the holders (mirror node) first,
+ * then checks the listing and the buyer (sale/lib.js saleChecks): it warns
+ * when the item is not listed on the site, or is listed at another price,
+ * and refuses a buyer who has not associated the token(s) or holds less HBAR
+ * than the price. An item that was not listed gets SALE but no UNLISTED.
+ * --dry-run does all of these checks, shows the sale and sends nothing.
  *
  * No consignment, allowance or split is involved (see consignment/ for those).
  * A royalty is not expected, because the Treasury is the fee collector; check
@@ -37,7 +41,7 @@
  */
 
 import { AccountId, Hbar } from "@hashgraph/sdk";
-import { parseSaleArgs, planSale, recordSold, saleProblems, saleTransaction } from "./lib.js";
+import { parseSaleArgs, planSale, recordSold, saleChecks, saleProblems, saleTransaction } from "./lib.js";
 import { parseEcdsaKey } from "../keys.js";
 import { loadSubmitKey } from "../hcs.js";
 import { readProvenance } from "../provenance.js";
@@ -57,7 +61,8 @@ Usage: NETWORK=testnet node src/sale/sellOwnItem.js <serial> <price-hbar> [--tok
 
   <serial>               the NFT serial, held by the Treasury
   <price-hbar>           the price in HBAR
-  --token umina|achala   the token class (default umina)`;
+  --token umina|achala   the token class (default umina)
+  --dry-run              check everything and show the sale, send nothing`;
 
 runScript("Sale failed", async (session) => {
   // --- 1. Check the arguments and environment ---
@@ -82,6 +87,12 @@ runScript("Sale failed", async (session) => {
   const plan = await planSale(process.env, events, { tokenClass, serial });
   if (plan.problems.length) return fail(plan.problems);
   const { nftId, nftIds } = plan;
+
+  // --- 3. Check the listing on the site (warnings) and that the buyer can
+  // receive the NFT(s) and pay (problems) ---
+  const checks = await saleChecks(process.env, plan, { buyerId, price: priceHbar });
+  checks.warnings.forEach((w) => console.warn(`⚠️  ${w}`));
+  if (checks.problems.length) return fail(checks.problems);
 
   console.table({
     nft: nftId.toString(),
@@ -115,6 +126,7 @@ runScript("Sale failed", async (session) => {
   // how to record it by hand.
   const recorded = await recordSold(client, process.env, { ...parties, saleTxId }, plan, {
     submitKey: loadSubmitKey(process.env),
+    unlist: checks.listed !== false,
   });
   if (recorded.problems.length) {
     console.error(`❌ Sale ${saleTxId} settled, but:`);

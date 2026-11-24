@@ -10,12 +10,13 @@
  */
 
 import { parseArgs } from "util";
-import { AccountId, NftId, TokenId, TransferTransaction } from "@hashgraph/sdk";
+import { AccountId, Hbar, NftId, TokenId, TransferTransaction } from "@hashgraph/sdk";
 import { holderProblems, readHolders } from "../nfts.js";
-import { mountIds } from "../provenance.js";
+import { mountIds, readDisplay } from "../provenance.js";
+import { buyerAccount, latestArrival } from "../mirror.js";
 import { achalaSaleFields, achalaSalePlan, mintOfSerial, mountedProblem } from "../mint/achala.js";
 import { buildEvent, submitEvent, submitKeyProblem } from "../hcs.js";
-import { displayFields } from "../display/lib.js";
+import { canonicalHbar, currentListing, displayFields } from "../display/lib.js";
 import { treasuryKeyProblem } from "../keys.js";
 import { envProblems, serialProblem } from "../env.js";
 import { TOKEN_CLASSES, tokenClassProblem } from "../token/lib.js";
@@ -127,6 +128,73 @@ export async function planSale(env, events, { tokenClass, serial }, { holders = 
 }
 
 /**
+ * The checks a sale from the command line makes before anything is sent,
+ * also on --dry-run, besides planSale. The sale backend makes its own,
+ * stricter ones (it sells only listed items, at the listed price).
+ *
+ * Warnings (the sale may go ahead): the item is not listed on the site, or is
+ * listed at another price, or the display topic could not be read. Problems
+ * (nothing is sent): the buyer's account does not exist, has not associated
+ * a token that moves, or holds less HBAR than the price (UA pays the fee).
+ *
+ * `listed` is false only when the display topic was read and the item is not
+ * listed, so that UNLISTED is not posted for it after the sale.
+ * @param {Record<string, string | undefined>} env TREASURY_ID, HCS_DISPLAY_TOPIC_ID
+ * @param {object} plan from planSale
+ * @param {{ buyerId: string, price: Hbar }} sale
+ * @param {{ display?: typeof readDisplay, arrival?: typeof latestArrival, account?: typeof buyerAccount }} [deps]
+ * @returns {Promise<{ problems: string[], warnings: string[], listed: boolean | null }>}
+ */
+export async function saleChecks(env, plan, { buyerId, price }, deps = {}) {
+  const { display = readDisplay, arrival = latestArrival, account = buyerAccount } = deps;
+  const out = { problems: [], warnings: [], listed: null };
+  const tokenId = plan.tokenId.toString();
+  const serial = String(plan.nftId.serial);
+  const item = plan.stoneId ? `${plan.stoneId} (${plan.nftId})` : String(plan.nftId);
+  const asked = canonicalHbar(price.toBigNumber().toFixed());
+
+  // The listing on the site: listed since the NFT last came to the Treasury
+  try {
+    const shown = await display(env);
+    if (shown.problem) throw new Error(shown.problem);
+    const since = await arrival(tokenId, serial, env.TREASURY_ID);
+    const listing = currentListing(shown.events, tokenId, serial, since);
+    out.listed = listing.listed;
+    if (!listing.listed) {
+      out.warnings.push(`${item} is not listed on the site; UNLISTED will not be posted after the sale`);
+    } else if (listing.price !== asked) {
+      out.warnings.push(`${item} is listed on the site at ${listing.price} HBAR; this sale is for ${asked} HBAR`);
+    }
+  } catch (err) {
+    out.warnings.push(`the listing was not checked (${err.message})`);
+  }
+
+  // The buyer can receive every token that moves, and pay the price
+  const tokenIds = [...new Set(plan.nftIds.map((id) => id.tokenId.toString()))];
+  try {
+    const buyer = await account(String(buyerId), tokenIds);
+    if (!buyer) {
+      out.problems.push(`the buyer's account ${buyerId} was not found on the mirror node`);
+      return out;
+    }
+    if (buyer.notAssociated.length) {
+      const token = plan.tokenClass === "achala" ? " --token achala" : "";
+      out.problems.push(
+        `the buyer ${buyerId} has not associated ${buyer.notAssociated.join(" and ")}: run associateToken.js buyer${token} first`,
+      );
+    }
+    if (buyer.balance !== null && BigInt(buyer.balance) < BigInt(price.toTinybars().toString())) {
+      out.problems.push(
+        `the buyer ${buyerId} holds ${canonicalHbar(Hbar.fromTinybars(buyer.balance).toBigNumber().toFixed())} HBAR, less than the price of ${asked} HBAR`,
+      );
+    }
+  } catch (err) {
+    out.problems.push(`cannot check the buyer's account ${buyerId} (${err.message})`);
+  }
+  return out;
+}
+
+/**
  * The one atomic transfer of a sale, not yet frozen: the buyer pays the price
  * to UA, and the Treasury sends every NFT of the plan to the buyer.
  * @param {{ uaId: string, treasuryId: string, buyerId: string, price: import("@hashgraph/sdk").Hbar }} parties
@@ -175,15 +243,16 @@ export function saleEvent({ uaId, treasuryId, buyerId, price, saleTxId }, plan) 
  * What follows a settled sale, from the command line or the site: SALE on the
  * provenance topic, then UNLISTED (reason "sold") on the display topic, so the
  * item leaves the catalog. It never throws: the sale has settled, so each step
- * that fails is returned with how to record it by hand.
+ * that fails is returned with how to record it by hand. With `unlist: false`
+ * (an item that was not listed, see saleChecks) only SALE is recorded.
  * @param {import("@hashgraph/sdk").Client} client UA's client
  * @param {Record<string, string | undefined>} env HCS_TOPIC_ID, HCS_DISPLAY_TOPIC_ID
  * @param {{ uaId: string, treasuryId: string, buyerId: string, price: import("@hashgraph/sdk").Hbar, saleTxId: string }} sale
  * @param {object} plan from planSale
- * @param {{ submitKey?: import("@hashgraph/sdk").PrivateKey | null, submit?: typeof submitEvent }} [options]
+ * @param {{ submitKey?: import("@hashgraph/sdk").PrivateKey | null, submit?: typeof submitEvent, unlist?: boolean }} [options]
  * @returns {Promise<{ saleEventTxId?: string, unlistedTxId?: string, problems: string[] }>}
  */
-export async function recordSold(client, env, sale, plan, { submitKey = null, submit = submitEvent } = {}) {
+export async function recordSold(client, env, sale, plan, { submitKey = null, submit = submitEvent, unlist = true } = {}) {
   const out = { problems: [] };
   const serial = String(plan.nftId.serial);
   const token = plan.tokenClass === "achala" ? " --token achala" : "";
@@ -194,6 +263,7 @@ export async function recordSold(client, env, sale, plan, { submitKey = null, su
       `SALE was not recorded (${err.message}); record it by hand: recordEvent.js with the sale ${sale.saleTxId}`,
     );
   }
+  if (!unlist) return out;
   try {
     const message = buildEvent(
       { event: "UNLISTED", stoneId: plan.stoneId, tokenId: plan.tokenId, serials: [serial], actorId: sale.uaId },

@@ -190,11 +190,12 @@ export async function latestArrival(tokenId, serial, accountId, fetchFn = fetch)
  * Whether an account can receive a token's NFTs (umina-achala-web#116): its
  * key, and for each token whether it is associated, or whether the account
  * associates new tokens on its own (max_automatic_token_associations -1, or
- * a free slot left). Returns null when the account does not exist.
+ * a free slot left), and its HBAR balance in tinybars (null when the mirror
+ * node does not give it). Returns null when the account does not exist.
  * @param {string} accountId
  * @param {string[]} tokenIds
  * @param {typeof fetch} [fetchFn]
- * @returns {Promise<{ key: { _type: string, key: string } | null, notAssociated: string[] } | null>}
+ * @returns {Promise<{ key: { _type: string, key: string } | null, notAssociated: string[], balance: number | null } | null>}
  */
 export async function buyerAccount(accountId, tokenIds, fetchFn = fetch) {
   const account = await getJson(`/api/v1/accounts/${accountId}`, fetchFn);
@@ -216,7 +217,7 @@ export async function buyerAccount(accountId, tokenIds, fetchFn = fetch) {
     }
     notAssociated.push(tokenId);
   }
-  return { key: account.key ?? null, notAssociated };
+  return { key: account.key ?? null, notAssociated, balance: account.balance?.balance ?? null };
 }
 
 async function countAutoAssociations(accountId, fetchFn) {
