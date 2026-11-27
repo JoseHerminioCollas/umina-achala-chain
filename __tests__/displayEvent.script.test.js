@@ -247,6 +247,34 @@ describe("displayEvent.js", () => {
       expect(errors()).toMatch(/it is not listed now, so there is nothing to unlist/);
     });
 
+    test("unlists an item already sold, held by its buyer (#50)", async () => {
+      mockDependencies({
+        display: [listed("5.0", 7, "50")],
+        nfts: { [`${UMINA}/7`]: { account_id: BUYER, deleted: false } },
+      });
+      await run("unlisted", "7", "--reason", "sold");
+      expect(process.exitCode).toBeUndefined();
+      expect(calls.hcs.message).toMatchObject({ event: "UNLISTED", serials: ["7"], reason: "sold" });
+      expect(console.log).toHaveBeenCalledWith(
+        `✅ UMINA-2026-AG-01 is held by ${BUYER}, listed at 50 HBAR. UNLISTED event:`,
+      );
+    });
+
+    test("a sold item that was never listed is still refused", async () => {
+      mockDependencies({ nfts: { [`${UMINA}/7`]: { account_id: BUYER, deleted: false } } });
+      await run("unlisted", "7", "--reason", "sold");
+      expect(process.exitCode).toBe(1);
+      expect(calls.hcs).toBeNull();
+      expect(errors()).toMatch(/it is not listed now, so there is nothing to unlist/);
+    });
+
+    test("refuses a serial the mirror node does not know", async () => {
+      mockDependencies({ display: [listed("5.0", 7, "50")], nfts: { [`${UMINA}/7`]: null } });
+      await run("unlisted", "7");
+      expect(process.exitCode).toBe(1);
+      expect(errors()).toMatch(/is not on the mirror node/);
+    });
+
     test("can unlist a stone listed before it was mounted", async () => {
       mockDependencies({ display: [listed("5.0", 8, "10")] });
       await run("unlisted", "8");

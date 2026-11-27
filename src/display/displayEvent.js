@@ -15,10 +15,12 @@
  *
  * Only items the Treasury holds are listed (Phase 2B: UA's own items, no
  * consignment). Before recording, every run checks on the mirror node that
- * the NFT exists, is not burned and is held by the Treasury; takes its
- * stone_id from its MINT on the provenance topic; and refuses an Umiña
- * mounted in an Achala that still exists (it is sold with its Achala, which is
- * listed as one item at one price).
+ * the NFT exists and takes its stone_id from its MINT on the provenance
+ * topic. listed also checks that the NFT is not burned and is held by the
+ * Treasury, and refuses an Umiña mounted in an Achala that still exists (it
+ * is sold with its Achala, which is listed as one item at one price).
+ * unlisted does not: it only clears a listing, so an item already sold (held
+ * by its buyer) can be unlisted, as after a sale whose UNLISTED failed (#50).
  *
  * A listing counts only if it was made after the NFT last arrived in the
  * Treasury: an item sold and returned is not listed again by its old LISTED,
@@ -86,12 +88,23 @@ async function prepareEvent(env, provenance, display) {
     if (mounted) return { problems: [mounted] };
   }
 
-  // Held by the Treasury now (mirror node)
+  // Held by the Treasury now (mirror node). Only a LISTED needs it: an
+  // UNLISTED only clears a listing, so an item already sold (held by its
+  // buyer) or burned can still be unlisted (#50).
   const nftIds = [new NftId(TokenId.fromString(tokenId), Number(serial))];
-  const held = holderProblems(nftIds, await readHolders(nftIds), env.TREASURY_ID, {
-    then: "Only items the Treasury holds are listed.",
-  });
-  if (held.length) return { problems: held };
+  const [info] = await readHolders(nftIds);
+  if (!info) return { problems: [`${nftIds[0]} is not on the mirror node. Check the serial.`] };
+  if (command === "listed") {
+    const held = holderProblems(nftIds, [info], env.TREASURY_ID, {
+      then: "Only items the Treasury holds are listed.",
+    });
+    if (held.length) return { problems: held };
+  }
+  const heldBy = info.deleted
+    ? "is burned"
+    : info.account_id === String(env.TREASURY_ID)
+      ? "is held by the Treasury"
+      : `is held by ${info.account_id}`;
 
   // Listed now: only display events since the NFT last arrived in the Treasury count
   const since = await latestArrival(tokenId, serial, env.TREASURY_ID);
@@ -101,6 +114,7 @@ async function prepareEvent(env, provenance, display) {
 
   return {
     listing,
+    heldBy,
     event: buildEvent(
       {
         event: DISPLAY_EVENTS[command],
@@ -160,7 +174,7 @@ runScript("Display event failed", async (session) => {
   const prepared = await prepareEvent(process.env, provenance.events, display.events);
   if (prepared.problems) return fail(prepared.problems);
   const was = prepared.listing.listed ? `listed at ${prepared.listing.price} ${CURRENCY}` : "not listed";
-  console.log(`✅ ${prepared.event.stone_id} is held by the Treasury, ${was}. ${prepared.event.event} event:`);
+  console.log(`✅ ${prepared.event.stone_id} ${prepared.heldBy}, ${was}. ${prepared.event.event} event:`);
   console.log(JSON.stringify(prepared.event, null, 2));
 
   if (input.dryRun) {
